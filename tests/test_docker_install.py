@@ -157,6 +157,15 @@ def test_the_live_image_proves_a_download_bind_mount_is_unchanged():
     assert "server process did not inherit UMASK=002" in workflow
 
 
+def test_browser_image_has_a_commit_tag_for_manual_nondefault_builds():
+    workflow = (ROOT / ".github" / "workflows" / "docker.yml").read_text(
+        encoding="utf-8"
+    )
+    browser_job = workflow.split("  image-browser:", 1)[1].split("\n  release:", 1)[0]
+    assert "workflow_dispatch:" in workflow
+    assert "type=sha,format=short,suffix=-browser" in browser_job
+
+
 def test_the_entrypoint_refuses_rather_than_letting_state_be_overwritten():
     body = ENTRYPOINT.read_text(encoding="utf-8")
     assert "ROMARR_DATA" in body, (

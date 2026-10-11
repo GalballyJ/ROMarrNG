@@ -339,6 +339,7 @@ jobs:
             type=raw,value=browser,enable={{is_default_branch}}
             type=semver,pattern={{version}}-browser
             type=semver,pattern={{major}}.{{minor}}-browser
+            type=sha,format=short,suffix=-browser
 
       - name: Build and push browser edition
         id: push
