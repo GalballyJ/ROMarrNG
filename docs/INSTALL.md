@@ -14,6 +14,7 @@ works, it was run. Where it has never been run, it says so.
 - [Docker Compose](#docker-compose) ← start here for a real install
 - [Proxmox LXC](#proxmox-lxc)
 - [Home Assistant](#home-assistant)
+- [YunoHost](#yunohost)
 - [From source](#from-source)
 - [First run: claiming the install](#first-run-claiming-the-install)
 - [The rule that catches everyone](#the-rule-that-catches-everyone)
@@ -91,6 +92,12 @@ When you are ready to import, move to compose rather than growing this command.
 ## Docker Compose
 
 The recommended install.
+
+The supplied compose file runs ROMarr with a read-only container root,
+`no-new-privileges`, and all Linux capabilities dropped except the three the
+entrypoint needs to prepare `/config` and switch to the configured user. Its
+temporary directory is a bounded `tmpfs`; configuration, ROMs, and downloads
+stay on their mounted volumes.
 
 ```bash
 mkdir -p /srv/romarr && cd /srv/romarr
@@ -202,9 +209,9 @@ nothing to drop to and no authority to chown with.
 | Tag | What it is |
 |---|---|
 | `latest` | **Main.** Every push to the default branch that passed the test suite. This is the one that gets fixes. |
-| `0.8`, `0` | The latest image built from a `v0.8.x` / `v0.x` git tag. |
-| `0.8.0` | Exactly the commit tagged `v0.8.0`. |
-| `sha-5cb6a75` | One specific commit. Every build publishes one. |
+| `0.14` | The latest patch release in the `v0.14.x` series. |
+| `0.14.0` | Exactly the commit tagged `v0.14.0`. |
+| `sha-<commit>` | One specific commit. Every build publishes one. |
 
 Two things worth knowing before you pin:
 
@@ -219,7 +226,7 @@ Two things worth knowing before you pin:
 
 The image is published for `linux/amd64`, `linux/arm64` and `linux/arm/v7`.
 **The armv7 leg has never been booted by the maintainer** — it is built in CI
-and the published image does contain the right things (32-bit ARM `python3.13`
+and the published image does contain the right things (32-bit ARM `python3.14`
 and `bsdtar`, with `rom_hub` deliberately absent, which is why the Hub tab
 reports plugins as unavailable there). A field report from a real 32-bit ARM
 board is worth more than another CI build.
@@ -315,6 +322,26 @@ page even if it is not in the schema.
 Set `romarr_password` before starting. ROMs default to `/media/roms`, which is
 Home Assistant's `media` share — where a RomM or Jellyfin add-on can also see
 them.
+
+---
+
+## YunoHost
+
+ROMarrNG has a native package for YunoHost 12.1 and newer on `amd64` and
+`arm64`. Install it from the app catalog when available, or install the
+`testing` branch while the catalog submission is under review:
+
+```bash
+sudo yunohost app install https://github.com/YunoHost-Apps/romarrng_ynh/tree/testing
+```
+
+The package installs at the root of a dedicated domain, defaults access to
+YunoHost administrators, and binds ROMarrNG to localhost behind YunoHost's
+Nginx proxy. ROMarrNG's own password login remains enabled. Give the
+`romarrng` service account access to the library and completed-download
+folders. App backups include settings and plugins but exclude ROM library
+files; back those up separately. See the [YunoHost administrator guide](../packaging/yunohost/doc/ADMIN.md)
+for permissions, storage, backup, and upgrade details.
 
 ---
 
@@ -484,6 +511,8 @@ Every variable ROMarr reads. "Seeded" means first-run only — see
 |---|---|---|
 | `ROMARR_PASSWORD` | unset | Unset is fine — the first visitor sets it. Set, it claims the install at startup with no setup screen. |
 | `ROMARR_API_KEY` | generated | Setting it pins the key and claims the install. |
+| `ROMARR_SEERRNG_API_KEY` | generated | Pins the SeerrNG integration-only key. Leave unset to manage and rotate it in Settings → General. |
+| `ROMARR_COOKIE_SECURE` | unset | Set to `1` only when every browser session uses HTTPS. |
 | `ROMARR_AUTH` | unset (password/key) | `forward` for SSO; `disabled` turns the gate off entirely, meaning **anything that reaches the port is in**, including a request that bypassed your proxy. |
 | `ROMARR_TRUSTED_PROXIES` | unset | **Required for `forward`.** Without it anyone could send the identity header themselves. |
 | `ROMARR_SSO_PROVIDER` | `authentik` | Also `authelia`, `cloudflare`, `oauth2-proxy`. |
@@ -569,6 +598,13 @@ refused. The Download Clients page names any protocol left uncovered.
 | `LIBRARY_API_KEY` | unset | *Seeded.* Alternative to username/password. |
 | `LIBRARY_PATH` | `/mnt/roms` | *Seeded.* The library root **as ROMarr sees it** — `/roms` in Docker. Wrong, and imports either fail or land where nothing scans. |
 | `DAT_PATH` | unset | A directory of No-Intro/Redump DATs. Point it at a directory holding **only** DATs. Pointed at a ROM library it used to hang startup for ten minutes; it now scans three levels deep, stops after 40,000 files, and says on the status page that it stopped early — which is a warning, not a working configuration. |
+| `TITLED_NAMES` | unset | Set to `1` to load Switch title names from TitleDB. This adds a 65–95 MB region file and uses more memory; basic title-ID validation is available without it. |
+| `TITLED_REGION` | `US.en` | Selects the TitleDB region file used when `TITLED_NAMES=1`. |
+
+Loaded DAT entries can also power SeerrNG's preservation catalog without IGDB
+credentials. Configure `DAT_PATH`; the contract advertises the supported
+matched systems and unmatched DAT headers. See the
+[SeerrNG integration guide](SEERRNG-INTEGRATION.md).
 
 The older `ROMM_URL`, `ROMM_USERNAME`, `ROMM_PASSWORD`, `ROMM_API_TOKEN` and
 `ROMM_LIBRARY` names are still read, so an existing install needs no changes.
@@ -579,15 +615,25 @@ Do not set both names for the same thing — the new one wins.
 | Variable | Default | |
 |---|---|---|
 | `GGREQUESTZ_URL` | unset | Request front-end, shown on the System page |
+| `COMPRESSATORIUM_URL` | unset | Optional service for batch decompression with DAT verification and safe removal of verified archives |
+| `COMPRESSATORIUM_API_KEY` | unset | Bearer token when Compressatorium authentication is enabled |
 | `STREAM_SERVER_URL` | unset | Headless RetroArch. Read-only: ROMarr asks which platforms it can play, and reports PS2/GameCube/Wii/Dreamcast/3DS as playable instead of download-only |
 | `MOONLIGHT_HOST` | unset | A Wolf, Sunshine or Steam Headless machine, e.g. `192.168.0.50` |
 | `MOONLIGHT_KIND` | `wolf` | Also `sunshine`, `steam-headless`. Not sniffed — `/serverinfo` cannot tell them apart |
 | `MOONLIGHT_USER` / `MOONLIGHT_PASS` | unset | Sunshine/Steam Headless admin credentials. Never written to the state file |
+| `MOONLIGHT_TLS_CA_FILE` | unset | CA certificate file visible inside the container. Sunshine admin credentials are sent only after certificate validation. |
+| `MOONLIGHT_TLS_FINGERPRINT` | unset | SHA-256 fingerprint for pinning the Sunshine certificate instead of trusting a CA. |
+| `MOONLIGHT_ALLOW_INSECURE_TLS` | unset | Set to `1` to opt in to untrusted TLS on a trusted LAN. Do not use over an untrusted network. |
 | `WOLF_SOCKET_PATH` / `WOLF_API_URL` | unset | Wolf's API is a UNIX socket — mount `wolf.sock`, or use the nginx proxy Wolf's own docs describe |
 | `STEAM_HEADLESS_URL` | unset | The container's noVNC/neko desktop, surfaced as a link |
 | `ROMARR_PLAYERS` | all four | `emulatorjs,ruffle,jsdos,emularity`, best first. `none` turns every browser route off. Empty means all four, not none |
 | `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | unset | Where your own js-dos and Emularity live. Without one, ROMarr reports that the player *would* run a file and names the setting that would let it link there |
 | `ROMARR_PUBLIC_URL` / `ROMARR_PEER_NAME` | unset / `ROMarr` | How a friend's server reaches this one. Peering is the only feature that needs ROMarr to know its own address |
+| `ROMARR_ALLOW_UNSANDBOXED_PLUGINS` | unset | Set to `1` only to allow ROM Hub plugins when seccomp is unavailable; normal operation requires the plugin sandbox. |
+
+ROM Hub plugins require seccomp isolation. When the sandbox is unavailable,
+plugin operations stop unless `ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1` explicitly
+opts out of that protection.
 
 ---
 
