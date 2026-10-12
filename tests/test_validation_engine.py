@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.validation_engine import engine
 from scripts.validation_engine.engine import (
     ValidationError,
     acquire_lock,
@@ -111,6 +112,14 @@ def test_local_test_execution_requires_matching_outer_sandbox_marker(tmp_path: P
     require_trusted_local_test_sandbox({"GITHUB_ACTIONS": "true"}, marker)
 
 
+def test_local_validation_refuses_dependency_install_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    with pytest.raises(ValidationError, match="Dependency installation is CI-only"):
+        engine.main(["--task", "install-test-dependencies"])
+
+
 def test_trusted_launcher_host_resource_canary() -> None:
     node = shutil.which("node")
     if node is None:
@@ -169,6 +178,13 @@ def test_validation_child_environment_uses_allowlist_and_private_directories(tmp
             run_root,
             {"GITHUB_TOKEN": "synthetic-token"},
         )
+    with pytest.raises(ValidationError, match="unapproved inherited environment variable"):
+        isolated_task_environment(
+            {"id": "pytest-suite", "kind": "test",
+             "pass_env": ["PIP_INDEX_URL"]},
+            run_root,
+            {"PIP_INDEX_URL": "https://packages.invalid/simple"},
+        )
     with pytest.raises(ValidationError, match="safe lowercase identifier"):
         isolated_task_environment({"id": "../outside", "kind": "test"}, run_root, {"PATH": "/toolchain/bin"})
     if os.name != "nt":
@@ -208,6 +224,138 @@ def test_native_task_writes_private_log_and_records_result_counts(tmp_path: Path
     assert result["skippedCases"] == 1
     assert result["excludedCases"] == 2
     assert log.stat().st_mode & 0o777 == 0o600
+
+
+def test_validation_child_process_environment_is_allowlisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inherited = {
+        "HTTPS_PROXY": "http://proxy.invalid:3128",
+        "PIP_INDEX_URL": "https://user:pass@packages.invalid/simple",
+        "PIP_EXTRA_INDEX_URL": "https://extra.invalid/simple",
+        "PIP_TRUSTED_HOST": "packages.invalid",
+        "PIP_CERT": "/operator/certs/pip-ca.pem",
+        "REQUESTS_CA_BUNDLE": "/operator/certs/requests-ca.pem",
+        "CURL_CA_BUNDLE": "/operator/certs/curl-ca.pem",
+        "SSL_CERT_FILE": "/operator/certs/ssl-ca.pem",
+        "SSL_CERT_DIR": "/operator/certs/ssl",
+        "GITHUB_TOKEN": "synthetic-token",
+    }
+    # Clear case-insensitively first: on Windows deleting `https_proxy` after
+    # setting `HTTPS_PROXY` removes that same environment entry.
+    for name in set(inherited) | {
+        "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    }:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in inherited.items():
+        monkeypatch.setenv(name, value)
+
+    code = (
+        "import json, os; keys = " + repr(list(inherited))
+        + "; print(json.dumps({key: os.environ.get(key) for key in keys}))"
+    )
+    report = {}
+    for task_id, pass_env in (
+        ("install-test-dependencies", list(inherited)[:-1]),
+        ("pytest-suite", []),
+    ):
+        task = {
+            "id": task_id,
+            "kind": "setup",
+            "command": [sys.executable, "-c", code],
+            "pass_env": pass_env,
+            "timeout_seconds": 10,
+        }
+        log = tmp_path / f"{task_id}.log"
+        result = run_task(tmp_path, task, log)
+        assert result["status"] == "passed"
+        report[task_id] = json.loads(log.read_text(encoding="utf-8"))
+
+    for name, value in inherited.items():
+        expected = None if name == "GITHUB_TOKEN" else value
+        assert report["install-test-dependencies"][name] == expected
+        assert report["pytest-suite"][name] is None
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="PR_SET_DUMPABLE is Linux-specific")
+def test_validation_task_cannot_read_runner_parent_environment(
+    tmp_path: Path,
+) -> None:
+    helper = r'''
+import sys
+from pathlib import Path
+from scripts.validation_engine.engine import run_task
+run_root = Path(sys.argv[1])
+run_root.mkdir(parents=True, exist_ok=True)
+task_code = """from pathlib import Path\nimport os\npath = Path(f'/proc/{os.getppid()}/environ')\ntry:\n data = path.read_bytes()\nexcept PermissionError:\n print('PARENT_ENV_BLOCKED')\nelse:\n print('PARENT_ENV_CANARY_VISIBLE' if b'VALIDATION_PARENT_CANARY=parent-secret' in data else 'PARENT_ENV_READABLE')\n"""
+task = {"id": "parent-env-probe", "kind": "setup",
+        "command": [sys.executable, "-c", task_code], "timeout_seconds": 10}
+result = run_task(Path.cwd(), task, run_root / "task.log")
+print(result["status"])
+print((run_root / "task.log").read_text())
+'''
+    environment = os.environ.copy()
+    environment["VALIDATION_PARENT_CANARY"] = "parent-secret"
+    result = subprocess.run(
+        [sys.executable, "-c", helper, str(tmp_path / "nested-run")],
+        cwd=Path(__file__).resolve().parents[1], env=environment,
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PARENT_ENV_BLOCKED" in result.stdout
+    assert "PARENT_ENV_CANARY_VISIBLE" not in result.stdout
+    assert "PARENT_ENV_READABLE" not in result.stdout
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="PR_SET_DUMPABLE is Linux-specific")
+def test_validation_runner_rejects_unrestorable_dumpable_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.validation_engine.engine as engine
+
+    class FakePrctl:
+        restype = None
+
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, option, *args):
+            self.calls.append(option)
+            return 2 if option == 3 else 0
+
+    class FakeLibc:
+        def __init__(self):
+            self.prctl = FakePrctl()
+
+    libc = FakeLibc()
+    monkeypatch.setattr(engine.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(engine.Path, "read_text",
+                        lambda *args, **kwargs:
+                        "CapEff:\t0000000000000000\n"
+                        "CapPrm:\t0000000000000000\n")
+    monkeypatch.setattr(engine.ctypes, "CDLL", lambda *args, **kwargs: libc)
+
+    with pytest.raises(ValidationError, match="cannot be restored"):
+        engine._hide_parent_environment()
+    assert libc.prctl.calls == [3]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="CAP_SYS_PTRACE is Linux-specific")
+def test_validation_runner_rejects_ptrace_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.validation_engine.engine as engine
+
+    monkeypatch.setattr(engine.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(engine.Path, "read_text",
+                        lambda *args, **kwargs:
+                        "CapEff:\t0000000000080000\n"
+                        "CapPrm:\t0000000000000000\n")
+    with pytest.raises(ValidationError, match="CAP_SYS_PTRACE"):
+        engine._hide_parent_environment()
 
 
 def test_lock_rejects_overlap_and_never_deletes_a_replaced_lock(tmp_path: Path) -> None:

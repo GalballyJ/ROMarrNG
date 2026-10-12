@@ -1,7 +1,7 @@
 """What a plugin subprocess is handed.
 
-ROM Hub's seccomp filter confines network and execution, but filesystem
-confinement is not in place. The environment allowlist remains a separate
+ROM Hub's seccomp filter confines network and execution, and ROMarr adds
+Landlock filesystem rules. The environment allowlist remains a separate
 boundary and must not hand plugins ROMarr's or its clients' credentials.
 
 It used to be `dict(os.environ, ...)`: every plugin inherited ROMARR_API_KEY,
@@ -21,10 +21,10 @@ from romarr import hub
 
 @pytest.fixture(autouse=True)
 def plugin_environment_is_confined(monkeypatch):
-    # These tests pin the environment allowlist; seccomp availability belongs
+    # These tests pin the environment allowlist; sandbox availability belongs
     # to the separate sandbox tests and varies with the host running pytest.
     monkeypatch.setattr(hub, "sandbox_state",
-                        lambda: (True, "seccomp filter available"))
+                        lambda: (True, "Landlock and seccomp available"))
 
 
 @pytest.fixture

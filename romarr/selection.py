@@ -233,6 +233,11 @@ class Release:
     # a browser -- unlike download_url it never carries a credential, and the
     # Search page links it so "what is this release" has a one-click answer.
     info_url: str = ""
+    # A platform verified from an acquisition provider's structured result.
+    # Most indexers do not expose this separately from the title, but ROM Hub
+    # does; retaining it lets the scorer use that evidence without inventing a
+    # console label in the title shown to the operator.
+    platform_slug: str = ""
 
 
 def is_game_release(release: Release) -> bool:
@@ -328,6 +333,17 @@ def judge(release: Release, wanted: str,
     if not title_matches(release.title, wanted):
         return Judgement(-500, verdict=f"title does not match {wanted!r}")
 
+    if platform is not None and release.protocol == "hub":
+        if not release.platform_slug:
+            return Judgement(-300,
+                             verdict="provider did not declare a platform")
+        if release.platform_slug != platform.slug:
+            return Judgement(-300,
+                             verdict="provider declared a different platform")
+    elif (platform is not None and release.platform_slug
+          and release.platform_slug != platform.slug):
+        return Judgement(-300, verdict="provider declared a different platform")
+
     points = 0
     reasons: list[tuple[int, str]] = []
     lowered = release.title.lower()
@@ -407,9 +423,11 @@ def judge(release: Release, wanted: str,
     # platform's aliases are removed from the check first, so asking for a Wii
     # game does not disqualify a title that says "Wii".
     if platform is not None:
+        declared_platform = release.platform_slug == platform.slug
         if platform.requires_platform_label and not any(
                 _mentions(lowered, label.lower()) for label in
-                (platform.slug, platform.name, *platform.aliases)):
+                (platform.slug, platform.name, *platform.aliases)) \
+                and not declared_platform:
             return Judgement(-300, verdict="missing explicit console platform")
         own = {platform.slug.lower(), platform.name.lower(), *platform.aliases,
                *platform.native_markers}
@@ -479,6 +497,8 @@ def judge(release: Release, wanted: str,
     if platform is not None:
         if _has_extension(lowered, platform.extensions):
             add(60, f"carries a {platform.name} ROM extension")
+        elif release.platform_slug == platform.slug:
+            add(30, f"provider declares {platform.name}")
         elif _mentions(lowered, platform.slug.lower()) or any(
                 _mentions(lowered, alias) for alias in platform.aliases):
             add(30, f"names {platform.name}")

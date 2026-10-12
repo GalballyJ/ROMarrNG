@@ -195,8 +195,38 @@ def test_hub_results_become_releases_on_the_same_pipeline(tmp_path, monkeypatch)
     assert r.protocol == "hub"
     assert r.indexer == "hub:archive-org"
     assert r.size == 3145728
+    assert r.platform_slug == "snes"
     assert r.download_url.startswith("hub://")
     assert hub.decode_result(r.download_url) == ROW
+
+
+def test_provider_platform_evidence_scores_and_rejects_other_platforms(
+    tmp_path, monkeypatch
+):
+    from dataclasses import replace
+    from romarr.selection import judge
+    from romarr.platforms import resolve
+
+    svc = _service(tmp_path, monkeypatch, [ROW], [_hub_client(tmp_path)])
+    platform = resolve("snes")
+    [release] = svc._hub_releases("Super Metroid", platform)
+    assert judge(release, "Super Metroid", platform).points > 0
+    judgement = judge(replace(release, platform_slug="ps2"), "Super Metroid",
+                      platform)
+    assert judgement.points < 0
+    assert "different platform" in judgement.verdict
+    untyped = judge(replace(release, platform_slug=""), "Super Metroid",
+                    platform)
+    assert untyped.points < 0
+    assert "did not declare a platform" in untyped.verdict
+
+
+def test_platform_specific_hub_search_discards_untyped_results(
+    tmp_path, monkeypatch
+):
+    row = {key: value for key, value in ROW.items() if key != "platform"}
+    svc = _service(tmp_path, monkeypatch, [row], [_hub_client(tmp_path)])
+    assert svc._hub_releases("Super Metroid", _FakePlatform()) == []
 
 
 def test_interactive_search_shows_hub_results(tmp_path, monkeypatch):
@@ -227,6 +257,45 @@ def test_a_failing_hub_does_not_sink_the_search(tmp_path, monkeypatch):
     assert svc._hub_releases("Super Metroid", _FakePlatform()) == []
 
 
+def test_hub_fetch_failure_finishes_the_linked_seerr_request(tmp_path):
+    from types import SimpleNamespace
+    from romarr.app import ROMarr
+    from romarr.store import QueueItem, SeerrRequest
+
+    service = ROMarr(env={"ROMARR_DATA": str(tmp_path / "state.json")})
+    external_id = "seerrng:hub-failure"
+    service.store.put_seerr_request(SeerrRequest(
+        external_id, "Super Metroid", "snes", status="downloading"))
+    cancelled_id = "seerrng:hub-cancelled"
+    service.store.put_seerr_request(SeerrRequest(
+        cancelled_id, "Cancelled Game", "snes", status="cancelled"))
+    service.queue.append(QueueItem(
+        "Super Metroid", "snes", "Super Metroid (USA)", 5, "grabbed",
+        external_request_id=external_id, download_id="hub-job-1",
+    ))
+    service.queue.append(QueueItem(
+        "Cancelled Game", "snes", "Cancelled Game (USA)", 5, "grabbed",
+        external_request_id=cancelled_id, download_id="hub-job-2",
+    ))
+    service.clients = [SimpleNamespace(
+        configured=True, protocol="hub", config_id="",
+        completed=lambda: [],
+        failed=lambda: [
+            {"id": "hub-job-1", "name": "Super Metroid (USA)",
+             "detail": "plugin fetch timed out"},
+            {"id": "hub-job-2", "name": "Cancelled Game (USA)",
+             "detail": "plugin fetch failed after cancellation"},
+        ],
+    )]
+
+    service.import_finished(retry_failed=False)
+    assert [item.state for item in service.queue] == ["failed", "failed"]
+    request = service.store.get_seerr_request(external_id)
+    assert request.status == "failed"
+    assert request.error == "plugin fetch timed out"
+    assert service.store.get_seerr_request(cancelled_id).status == "cancelled"
+
+
 def test_sandbox_failure_requires_explicit_operator_opt_in(monkeypatch):
     monkeypatch.setattr(hub, "sandbox_state", lambda: (False, "unavailable"))
     monkeypatch.delenv("ROMARR_ALLOW_UNSANDBOXED_PLUGINS", raising=False)
@@ -254,6 +323,44 @@ def test_separate_jobs_cannot_overwrite_identically_named_files(tmp_path):
     assert {Path(d["content_path"]).read_text() for d in done} == {"one", "two"}
     assert len({d["id"] for d in done}) == 2
     assert HubDownloader(HubConfig(str(tmp_path))).completed() == done
+
+
+def test_stale_hub_failure_snapshot_cannot_fail_a_new_retry(tmp_path):
+    from romarr.app import ROMarr
+    from romarr.store import QueueItem, SeerrRequest
+
+    url = hub.encode_result(ROW)
+    client = HubDownloader(
+        HubConfig(str(tmp_path)),
+        fetch=lambda row, dest: {"ok": False, "error": "old failure",
+                                 "files": []},
+    )
+    assert client.add(url, name=ROW["title"])
+    failed_id = client.last_job_id
+    client.completed()
+    [stale_failure] = client.failed()
+    assert stale_failure["id"] == failed_id
+
+    external_id = "seerrng:hub-retry"
+    service = ROMarr(env={"ROMARR_DATA": str(tmp_path / "state.json")})
+    service.store.put_seerr_request(SeerrRequest(
+        external_id, "Super Metroid", "snes", status="downloading"))
+    assert client.add(url, name=ROW["title"])
+    retry_id = client.last_job_id
+    assert retry_id != failed_id
+    service.queue.append(QueueItem(
+        "Super Metroid", "snes", ROW["title"], 0, "grabbed",
+        external_request_id=external_id, download_id=retry_id,
+    ))
+
+    # Model a failure snapshot taken just before the retry is handed off.
+    client.completed = lambda: []
+    client.failed = lambda: [stale_failure]
+    service.clients = [client]
+    service.import_finished(retry_failed=False)
+
+    assert service.queue[0].state == "grabbed"
+    assert service.store.get_seerr_request(external_id).status == "downloading"
 
 
 def test_multi_file_job_reports_its_whole_isolated_directory(tmp_path):

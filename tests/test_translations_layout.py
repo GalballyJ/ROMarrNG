@@ -91,6 +91,45 @@ def test_present_translation_is_not_reported_missing():
     assert plan.titles[0].status == "verified"
 
 
+def test_1g1r_off_still_applies_translation_language_and_exclusion_policy():
+    dat = _dat_with(
+        "Game (USA)",
+        "Game (Japan) [T-En]",
+        "Game (Japan) [T-De]",
+        "Game (Japan) [T-De] (Hack)",
+    )
+    plan = build_plan(dat, {}, Policy(
+        one_game_one_rom=False,
+        regions=("usa",),
+        translation_policy="keep_both",
+        translation_langs=("de",),
+    ))
+    names = [title.name for title in plan.titles]
+    assert "Game (USA)" in names
+    assert "Game (Japan) [T-De]" in names
+    assert "Game (Japan) [T-En]" not in names
+    assert "Game (Japan) [T-De] (Hack)" not in names
+    assert sum(title.is_translation for title in plan.titles) == 1
+
+
+def test_1g1r_off_fill_uses_language_policy_when_no_preferred_normal_dump():
+    dat = _dat_with(
+        "Game (Japan)",
+        "Game (Japan) [T-En]",
+        "Game (Japan) [T-De]",
+    )
+    plan = build_plan(dat, {}, Policy(
+        one_game_one_rom=False,
+        regions=("usa",),
+        translation_policy="fill",
+        translation_langs=("de",),
+    ))
+    names = [title.name for title in plan.titles]
+    assert "Game (Japan)" in names
+    assert "Game (Japan) [T-De]" in names
+    assert "Game (Japan) [T-En]" not in names
+
+
 # -- folder structure --------------------------------------------------------
 
 def test_platform_dir_flat_is_structure_a():

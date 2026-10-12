@@ -8,6 +8,7 @@ counts, and private logs so local and hosted results can be compared safely.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -33,7 +34,15 @@ INHERITED_ENVIRONMENT_KEYS = frozenset({
     "MISE_DATA_DIR", "MISE_HOME", "PATH", "PATHEXT", "PYENV_ROOT",
     "SYSTEMROOT", "TZ", "WINDIR",
 })
-APPROVED_TASK_PASS_ENVIRONMENT: dict[str, frozenset[str]] = {}
+APPROVED_TASK_PASS_ENVIRONMENT: dict[str, frozenset[str]] = {
+    "install-test-dependencies": frozenset({
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+        "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+        "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_TRUSTED_HOST",
+        "PIP_CERT", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+        "SSL_CERT_FILE", "SSL_CERT_DIR",
+    }),
+}
 IGNORED_DIRS = {".git", ".pytest_cache", "__pycache__", ".venv", "venv", "node_modules", "_output", "_tests", "TestResults", "coverage"}
 PROGRESS_INTERVAL_SECONDS = 60
 
@@ -339,9 +348,18 @@ def isolated_task_environment(
     ):
         raise ValidationError("Validation task requests an unapproved inherited environment variable: " + str(task.get("id")))
     for name in pass_env:
-        match = next((value for key, value in source.items() if key.upper() == name.upper()), None)
-        if isinstance(match, str):
-            environment[name] = match
+        if name in source and isinstance(source[name], str):
+            environment[name] = source[name]
+            continue
+        # Windows environment names are case-insensitive. Preserve the
+        # explicit configured spelling in the child while looking up the
+        # caller's value without accidentally merging upper/lowercase proxy
+        # settings on POSIX.
+        if os.name == "nt":
+            match = next((value for key, value in source.items()
+                          if key.upper() == name.upper()), None)
+            if isinstance(match, str):
+                environment[name] = match
     environment.update({key: value for key, value in task.get("env", {}).items() if isinstance(value, str)})
 
     environment_root = run_root / f"{task_id}-environment"
@@ -394,35 +412,109 @@ def format_validation_progress(repository: str, tasks: list[dict[str, Any]], res
     return f"[validation] {repository}: {completed}/{len(tasks)} selected tasks complete ({passed} passed, {failed} failed, {blocked} blocked, {pending} pending){active}"
 
 
+def _hide_parent_environment() -> tuple[Any, int] | None:
+    """Prevent same-UID task children from reading this runner via procfs."""
+    if not sys.platform.startswith("linux"):
+        return None
+    if os.geteuid() == 0:
+        raise ValidationError(
+            "Validation tasks must not run from a root-owned runner; "
+            "a same-UID child may retain ptrace access to its environment."
+        )
+    try:
+        status = Path("/proc/self/status").read_text(encoding="ascii")
+        capabilities = {
+            line.split(":", 1)[0]: int(line.split(":", 1)[1].strip(), 16)
+            for line in status.splitlines()
+            if line.startswith(("CapEff:", "CapPrm:"))
+        }
+        if not {"CapEff", "CapPrm"}.issubset(capabilities):
+            raise ValueError("capability fields are missing")
+    except (OSError, ValueError, IndexError) as exc:
+        raise ValidationError(
+            "Cannot verify the validation runner's ptrace capabilities."
+        ) from exc
+    ptrace_capability = 1 << 19  # CAP_SYS_PTRACE
+    if any(capabilities.get(name, 0) & ptrace_capability
+           for name in ("CapEff", "CapPrm")):
+        raise ValidationError(
+            "Validation tasks cannot run while the runner has "
+            "CAP_SYS_PTRACE; child processes could read its environment."
+        )
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.prctl.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    previous = libc.prctl(3, 0, 0, 0, 0)  # PR_GET_DUMPABLE
+    if previous < 0:
+        raise ValidationError(
+            "Cannot protect the validation runner environment "
+            f"(PR_GET_DUMPABLE errno {ctypes.get_errno()})."
+        )
+    if previous not in (0, 1):
+        raise ValidationError(
+            "Cannot protect the validation runner environment: "
+            f"the current dumpable state ({previous}) cannot be restored."
+        )
+    ctypes.set_errno(0)
+    if libc.prctl(4, 0, 0, 0, 0) != 0:  # PR_SET_DUMPABLE = 0
+        raise ValidationError(
+            "Cannot protect the validation runner environment "
+            f"(PR_SET_DUMPABLE errno {ctypes.get_errno()})."
+        )
+    return libc, int(previous)
+
+
+def _restore_parent_environment(state: tuple[Any, int] | None) -> None:
+    if state is None:
+        return
+    libc, previous = state
+    ctypes.set_errno(0)
+    if libc.prctl(4, previous, 0, 0, 0) != 0:  # PR_SET_DUMPABLE
+        raise ValidationError(
+            "Cannot restore validation runner process state "
+            f"(PR_SET_DUMPABLE errno {ctypes.get_errno()})."
+        )
+
+
 def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]:
     start = time.monotonic()
     started_at = utc_now()
     env = isolated_task_environment(task, log_path.parent)
-    proc = subprocess.Popen(
-        task["command"],
-        cwd=root,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=(os.name != "nt"),
-    )
-    timed_out = False
+    dumpable_state = _hide_parent_environment()
     try:
-        output_bytes, _ = proc.communicate(timeout=task.get("timeout_seconds", 1800))
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        if os.name != "nt":
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-                proc.wait(timeout=2)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
+        proc = subprocess.Popen(
+            task["command"],
+            cwd=root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=(os.name != "nt"),
+        )
+        timed_out = False
+        try:
+            output_bytes, _ = proc.communicate(
+                timeout=task.get("timeout_seconds", 1800))
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            if os.name != "nt":
                 try:
-                    os.killpg(proc.pid, signal.SIGKILL)
+                    os.killpg(proc.pid, signal.SIGTERM)
+                    proc.wait(timeout=2)
                 except ProcessLookupError:
                     pass
-        else:
-            proc.kill()
-        output_bytes, _ = proc.communicate()
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            else:
+                proc.kill()
+            output_bytes, _ = proc.communicate()
+    finally:
+        # Keep the runner hidden for the entire child lifetime. Restore it only
+        # after the task exits so unrelated local tooling remains unaffected.
+        _restore_parent_environment(dumpable_state)
     output = output_bytes.decode("utf-8", "replace")
     with log_path.open("wb") as log:
         os.chmod(log_path, 0o600)
@@ -646,6 +738,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.plan:
         print(json.dumps(plan, indent=2) if args.json else f"{config.REPOSITORY}: {len(plan['inventory'])} test files; {sum(item['selected'] for item in plan['tasks'])} tasks selected; {sum(item['available'] for item in plan['prerequisites'])}/{len(plan['prerequisites'])} commands available")
         return 0
+    if os.environ.get("GITHUB_ACTIONS") != "true" and any(
+        task["selected"] and task["id"] == "install-test-dependencies"
+        for task in plan["tasks"]
+    ):
+        raise ValidationError(
+            "Dependency installation is CI-only because it runs package build "
+            "hooks. For local tests, use a preconfigured Python 3.13 environment "
+            "and run pytest through the trusted offline launcher."
+        )
     if any(task['selected'] and task['kind'] == 'test' for task in plan['tasks']):
         require_trusted_local_test_sandbox()
     lock = acquire_lock(ROOT)

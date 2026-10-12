@@ -3164,16 +3164,18 @@ class HubDownloader:
             log.warning("refusing an undecodable hub release: %s", err)
             return False
         rows = self._read()
-        job_id = "hub:" + hashlib.sha256(url.encode()).hexdigest()
         for row in rows:
             if row.get("url") != url:
                 continue
             if row.get("state") == "pending" or (
                     row.get("state") == "done" and row.get("file") and Path(row["file"]).exists()):
-                self._added.job_id = row.get("id", job_id)
+                self._added.job_id = row.get("id", "")
                 return True
         # Retry replaces failed/missing attempts. Historical failures must not
-        # poison a new request which shares the same stable download identity.
+        # poison a new request which shares the same release URL. Each attempt
+        # gets a distinct ID so a failure snapshot taken before this retry
+        # cannot match the retry's queue row after it has been handed off.
+        job_id = "hub:" + secrets.token_hex(16)
         rows = [row for row in rows if row.get("url") != url]
         rows.append({
             "id": job_id, "url": url, "name": name,

@@ -256,22 +256,36 @@ mount of yours, and no network sockets of its own. Its only route outward is an
 RPC back to ROMarr, which checks the destination against the hosts that plugin
 declared in its manifest *before* opening a connection. A plugin that asks for
 a host it did not declare is refused and the request never reaches the network.
-A seccomp filter enforces this; it needs Linux and `pyseccomp`.
+Linux seccomp blocks direct sockets and process execution. Landlock restricts
+filesystem access to the installed plugin, verified data assets, the runtime
+files it needs, and a private scratch directory on a finite tmpfs. The plugin
+can write only to scratch, and each scratch file is capped at 64 MiB. A stacked
+seccomp filter also blocks permission/ownership changes, child processes, and
+`io_uring` entry points that could bypass direct socket-call restrictions while
+keeping ordinary threads available. These restrictions are checked before
+plugin work starts.
 
 What that does **not** cover:
 
-- A plugin runs arbitrary code in its subprocess and can read any file ROMarr
-  can. Filesystem confinement needs a mount namespace and is not in place.
-- Memory is not capped. The wall-clock timeout and output-size cap are.
+- The plugin can read the files deliberately made available to its runtime and
+  can use its own configured credentials. Landlock is path confinement, not a
+  virtual machine; shared-kernel vulnerabilities and memory exhaustion remain
+  outside this boundary.
+- Scratch uses the available tmpfs mount (`/tmp` in the supplied Compose file,
+  otherwise `/dev/shm`). A plugin can consume the mount's remaining capacity
+  during a request, so its configured size also bounds the resulting disk or
+  shared-memory impact. Plugin processes have a wall-clock timeout and output
+  cap, but no separate memory limit.
 - It can reach every host it declared. Read that list before installing; a
   search plugin asking for hosts unrelated to its source is the warning sign.
 
-**If the filter cannot be installed, plugin operations stop.** ROMarr does not
-silently run third-party code without its network/exec boundary. An operator
-who accepts that risk can explicitly set
+**If either boundary cannot be installed, plugin operations stop.** ROMarr does
+not silently run third-party code without its network/exec and filesystem
+boundaries and bounded scratch. An operator who accepts that risk can explicitly set
 `ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1`; ROMarr then logs the choice and sets the
 Hub's `ROM_HUB_ALLOW_UNSANDBOXED=1` only for the plugin subprocess. The normal
-Docker images include the runtime dependencies needed for the filter.
+Docker images include the runtime dependencies needed for seccomp; the host
+kernel must support Landlock and provide a finite tmpfs for plugin scratch.
 
 What *is* enforced:
 
@@ -295,8 +309,9 @@ surface is deliberate: fewer dependencies is fewer supply-chain paths.
 
 Stated so nobody assumes otherwise:
 
-- **No filesystem confinement for plugins.** Network and exec are
-  confined; a plugin can still read any file ROMarr can. See above.
+- **No protection from a compromised shared kernel.** Landlock and seccomp
+  constrain plugin processes but do not provide a VM or protect against a
+  kernel escape. See above for the plugin boundary and its limits.
 - **No protection against a malicious library or indexer you configured.**
   ROMarr trusts responses from services you pointed it at.
 - **No encryption at rest.** `romarr.json` and `.env` hold credentials in

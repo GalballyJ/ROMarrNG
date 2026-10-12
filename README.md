@@ -557,7 +557,7 @@ request actually came through it.
 | `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | no | Where your own js-dos and Emularity live. Without one, ROMarr reports that the player *would* run a file and names the setting that would let it link there |
 | `ROMARR_DATA` | no | Path to the state file |
 | `ROMARR_HOST` | no | Address to listen on (default `0.0.0.0`); use `127.0.0.1` only when the proxy shares the host network namespace |
-| `ROMARR_ALLOW_UNSANDBOXED_PLUGINS` | no | Explicitly allow ROM Hub plugins to run when seccomp is unavailable; keep unset to require sandboxing |
+| `ROMARR_ALLOW_UNSANDBOXED_PLUGINS` | no | Explicitly allow ROM Hub plugins when Landlock or seccomp is unavailable; keep unset to require both boundaries |
 | `DAT_PATH` | no | Directory of No-Intro / Redump DATs. Loose `.dat`/`.xml` files **and** the ZIP archives No-Intro distributes are read, including one level down beside the platform they describe. Point it at a DAT directory, not at your ROM library |
 | `COMPRESSATORIUM_URL` | no | A [Compressatorium](https://github.com/pacnpal/compressatorium) service, for the Decompress task: batch decompress a compressed library, verify every output against the DATs, and delete only the originals that verified. The library must be mounted into both containers at the same path |
 | `COMPRESSATORIUM_API_KEY` | no | Bearer token, when Compressatorium has `COMPRESSATORIUM_ENABLE_AUTH=true` |
@@ -834,8 +834,10 @@ pip install "rom-hub @ git+https://github.com/BlizzHacker/rom-hub@master"
 
 Plugins requiring an API key (e.g. RetroAchievements) are marked in the UI.
 
-Plugins are third-party and run with seccomp isolation when it is available.
-If the sandbox cannot be enabled, ROMarr disables plugin operations unless
+Plugins are third-party and run with Landlock filesystem confinement and
+seccomp network, process, and metadata isolation when available. Their scratch
+files live on a finite tmpfs. If any required boundary or tmpfs is unavailable,
+ROMarr disables plugin operations unless
 `ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1` explicitly opts out. Install only plugins
 you trust.
 
@@ -989,9 +991,9 @@ both the reported path and the resolved path.
   Integration calls are limited to 64 KiB request bodies, 120 requests per
   minute per client address, and four concurrent acquisitions; see the
   [integration contract](docs/SEERRNG-INTEGRATION.md).
-- ROM Hub plugin operations require seccomp. They are unavailable when the
-  sandbox cannot be enabled unless `ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1`
-  explicitly opts out.
+- ROM Hub plugin operations require Landlock, seccomp, and a finite tmpfs for
+  plugin scratch. They are unavailable when any requirement cannot be enabled unless
+  `ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1` explicitly opts out.
 - The supplied Docker Compose file uses a read-only root filesystem, drops all
   capabilities except the three needed by its entrypoint, and enables
   `no-new-privileges`; `/tmp` remains a bounded temporary filesystem.

@@ -284,6 +284,43 @@ def _seerr_title_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", without_marks)
 
 
+_DAT_REGION_ALIASES = {
+    "u": "usa", "us": "usa", "usa": "usa", "north america": "usa",
+    "ntsc": "usa", "ntsc u": "usa", "ntsc us": "usa",
+    "ntsc usa": "usa",
+    "e": "europe", "eu": "europe", "eur": "europe", "europe": "europe",
+    "pal": "europe",
+    "j": "japan", "jp": "japan", "jpn": "japan", "japan": "japan",
+    "ntsc j": "japan", "ntsc jp": "japan", "ntsc japan": "japan",
+    "w": "world", "world": "world",
+}
+
+
+def _dat_variant_regions(title: str) -> frozenset[str]:
+    """Canonical No-Intro region tags in a DAT or release title."""
+    regions = set()
+    for group in re.findall(r"[\(\[]([^\)\]]*)[\)\]]", str(title or "")):
+        for part in group.split(","):
+            key = re.sub(r"[^a-z]+", " ", part.casefold()).strip()
+            region = _DAT_REGION_ALIASES.get(key)
+            if region:
+                regions.add(region)
+    return frozenset(regions)
+
+
+def _seerr_dat_variant_matches(dat_entry: str, release_title: str) -> bool:
+    """Reject contradictory release regions while tolerating common aliases.
+
+    The clean catalog title is scored independently. A DAT variant such as
+    ``(USA)`` is also allowed to match a release tagged ``(U)``; a release with
+    no recognized region tag remains eligible because its name supplies no
+    evidence that it is the wrong variant.
+    """
+    requested = _dat_variant_regions(dat_entry)
+    actual = _dat_variant_regions(release_title)
+    return not requested or not actual or bool(requested & actual)
+
+
 def _seerr_library_lookup(service, titles: list[dict]) -> dict:
     games, _, _ = service._library_cache
     requested = {
@@ -421,7 +458,11 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
     assets = _seerr_local_assets(service, request)
     status = "searching" if request.status == "dispatching" else request.status
     failure_detail = request.error or ""
-    if status != "cancelled":
+    # The durable request status belongs to the current attempt. Queue rows
+    # are historical, so an older failed attempt must not mask a retry while
+    # its search or handoff is in progress.
+    attempt_active = request.status in ("searching", "dispatching")
+    if status != "cancelled" and not attempt_active:
         if queue_item and queue_item.state == "imported":
             status, error = "available", None
         elif queue_item and queue_item.state == "grabbed":
@@ -457,8 +498,7 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
         error = failure_message
     if status != "failed" and status != "cancelled":
         failure_detail = ""
-    dispatch_in_progress = request.status == "dispatching" and status == "searching"
-    if not dispatch_in_progress and (
+    if not attempt_active and (
         status != request.status or (error or "") != request.error
     ):
         service.store.update_seerr_request(
@@ -941,8 +981,14 @@ class ROMarr:
         # verifies the request came *through* it, learns who the user is, and
         # can require a group.
         self.limiter = RateLimiter()
+        # TitleDB is a separate catalogue, not a DAT side effect. Keep an
+        # empty index available even when no DAT_PATH is configured; its data
+        # is loaded lazily when a Switch surface first needs it.
+        self.titled = TitleDBIndex()
+        self._titled_loaded = False
         self.reload_dats(e.get("DAT_PATH", "")
-                         or self.store.settings.get("dat_path", ""))
+                         or self.store.settings.get("dat_path", ""),
+                         load_titled=False)
         self.reload_metadata()
         self.reload_policy()
         self.sso = None
@@ -1899,8 +1945,12 @@ class ROMarr:
             if not row.get("title") or not row.get("source_id") or not row.get("plugin"):
                 continue
             declared_platform = resolve(str(row.get("platform") or ""))
-            if platform and row.get("platform") and (
-                    declared_platform is None or declared_platform.slug != platform.slug):
+            # A platform-specific acquisition must be backed by the Hub's
+            # structured platform field. A title-only result can be a real
+            # game on several consoles, and trusting the requested search
+            # filter would let (for example) a SNES title be imported as GBA.
+            if platform and (declared_platform is None
+                             or declared_platform.slug != platform.slug):
                 continue
             try:
                 size = max(0, int(row.get("size_bytes") or 0))
@@ -1920,6 +1970,8 @@ class ROMarr:
                 protocol="hub",
                 indexer=f"hub:{row.get('plugin') or 'plugin'}",
                 info_url=str(row.get("url") or ""),
+                platform_slug=(declared_platform.slug
+                               if declared_platform else ""),
             ))
         return out
 
@@ -1977,7 +2029,7 @@ class ROMarr:
         if platform is None:
             return {"ok": False, "error": f"unknown platform: {platform_name!r}"}
 
-        search_game = game
+        selected_dat_entry = ""
         if external_request_id:
             request = self.store.get_seerr_request(external_request_id)
             if request is None or request.status == "cancelled":
@@ -1987,9 +2039,18 @@ class ROMarr:
                                             policy=catalog_policy(self.store.settings))
                 if selected is None:
                     return {"ok": False, "error": "DAT title is no longer allowed by the catalog policy"}
-                search_game = selected["dat"]["entry"]
-        releases = self._search_releases(search_game, platform)
-        pick = best_release(releases, search_game, platform,
+                selected_dat_entry = selected["dat"]["entry"]
+        # Score against the clean game title SeerrNG requested. DAT region
+        # metadata is enforced separately so aliases such as (USA)/(U) do not
+        # turn a valid release into a false title mismatch.
+        releases = self._search_releases(game, platform)
+        if selected_dat_entry:
+            releases = [
+                release for release in releases
+                if _seerr_dat_variant_matches(selected_dat_entry,
+                                             release.title)
+            ]
+        pick = best_release(releases, game, platform,
                            profile=self.profile, blocklist=self.blocklist)
         if pick is None:
             if external_request_id and not self.store.mark_seerr_dispatching(
@@ -2379,7 +2440,8 @@ class ROMarr:
         """How far the DAT scan is allowed to go. Overridable for testing."""
         return DAT_SCAN_DEPTH, DAT_SCAN_MAX_ENTRIES
 
-    def reload_dats(self, directory: str = "") -> dict:
+    def reload_dats(self, directory: str = "", *,
+                    load_titled: bool = True) -> dict:
         """Load every DAT under `directory`.
 
         Optional and quiet. An operator with no DATs is the common case on
@@ -2395,10 +2457,14 @@ class ROMarr:
         self.dats = DatIndex()
         self.store.settings["dat_path"] = str(directory or "")
         if not directory:
+            if load_titled:
+                self.reload_titled()
             return {"loaded": 0, "path": ""}
         root = Path(directory)
         if not root.is_dir():
             log.warning("DAT_PATH %s is not a directory", root)
+            if load_titled:
+                self.reload_titled()
             return {"loaded": 0, "path": str(root),
                     "error": f"{root} is not a directory"}
         found, stopped = _find_dats(root)
@@ -2443,8 +2509,9 @@ class ROMarr:
             result["truncated"] = stopped
             log.warning("DAT scan stopped early: %s", stopped)
         
-        # Also initialize TitleDB for Switch validation
-        self.reload_titled()
+        # TitleDB is independent of DAT_PATH; explicit reloads refresh both.
+        if load_titled:
+            self.reload_titled()
         
         return result
     
@@ -2460,6 +2527,7 @@ class ROMarr:
         """
         try:
             self.titled = build_titled_index()
+            self._titled_loaded = True
             count = len(self.titled.titles) if self.titled else 0
             log.info("TitleDB index loaded with %d Switch title IDs", count)
             return {"loaded": count, "names": self.titled.names_loaded,
@@ -2467,7 +2535,27 @@ class ROMarr:
         except Exception as exc:
             log.warning("TitleDB initialization failed: %s", exc)
             self.titled = TitleDBIndex()
+            self._titled_loaded = True
             return {"loaded": 0, "status": "error", "error": str(exc)}
+
+    def ensure_titled(self) -> TitleDBIndex:
+        """Load TitleDB on first use, independently of whether DATs exist.
+
+        A new install may have no DAT_PATH at all and still needs the Switch
+        catalogue. Keep startup offline and initialize the empty index eagerly;
+        the first Switch collection/import request performs the best-effort
+        fetch, while a failed fetch can be retried from the explicit reload.
+        """
+        current = getattr(self, "titled", None)
+        # A caller may preload an index before the first collection or
+        # validation request. Treat an already-populated index as loaded so a
+        # lazy fetch does not replace the supplied catalogue.
+        if (not getattr(self, "_titled_loaded", False) and current is not None
+                and getattr(current, "titles", None)):
+            self._titled_loaded = True
+        if not getattr(self, "_titled_loaded", False):
+            self.reload_titled()
+        return self.titled
 
     # -- the queue ----------------------------------------------------------
 
@@ -2707,7 +2795,7 @@ class ROMarr:
                 row["hollow"] = hollow
             if row.get("platform") == "switch":
                 catalogue = validate_switch_rom(row.get("filename", ""),
-                                               index=getattr(self, "titled", None))
+                                               index=self.ensure_titled())
                 title = catalogue.pop("title", None)
                 catalogue["title"] = asdict(title) if title is not None else None
                 catalogue["checksum_verified"] = False
@@ -2929,7 +3017,7 @@ class ROMarr:
         from .collections import Policy, build_plan
         from .titled import SWITCH_COLLECTION, collection_plan as switch_plan
         if dat_name == SWITCH_COLLECTION:
-            return switch_plan(getattr(self, "titled", TitleDBIndex()),
+            return switch_plan(self.ensure_titled(),
                                self._present_titles("switch"),
                                query=policy_kw.get("query", ""),
                                kinds=policy_kw.get("kinds", "base"),
@@ -4903,6 +4991,7 @@ class ROMarr:
                                 for item in client.completed())
                 if getattr(client, "protocol", "") == "hub":
                     for failure in client.failed():
+                        request_ids = set()
                         with self._lock:
                             for item in matching_queue_items(self.queue, failure, client_id=client_id):
                                 if item.state == "grabbed":
@@ -4910,6 +4999,16 @@ class ROMarr:
                                     item.detail = failure["detail"]
                                     # Configuration failures do not condemn the release.
                                     item.release_fault = False
+                                    if item.external_request_id:
+                                        request_ids.add(item.external_request_id)
+                        for external_id in request_ids:
+                            self.store.update_seerr_request(
+                                external_id,
+                                status="failed",
+                                error=failure["detail"] or
+                                      "ROM Hub could not fetch this request.",
+                                only_if_not_cancelled=True,
+                            )
             except Exception as err:
                 # One unreachable client must not stop the others importing.
                 log.warning("%s completed() failed: %s", getattr(client, "name", client), err)

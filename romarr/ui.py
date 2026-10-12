@@ -724,11 +724,15 @@ RENDER.hub=async()=>{
     (confined
       ? '<div class="panel-note" style="border-left:3px solid var(--ok)">'
         +'<b>Plugins run confined.</b> Each runs as its own subprocess with no '
-        +'library token and no sockets of its own &mdash; it can only reach the '
-        +'hosts it declared. It can still read files ROMarr can.</div>'
+        +'library token or sockets of its own. Landlock limits file access to '
+        +'plugin code, verified assets and runtime files; writes stay in bounded '
+        +'tmpfs scratch. It cannot change file permissions or spawn child '
+        +'processes. Network requests go through ROMarr and can reach only '
+        +'declared hosts.</div>'
       : '<div class="panel-note panel-warn"><b>Plugins run with no '
         +'confinement.</b> '+esc(hs.sandbox_detail||'')+' A plugin you install '
-        +'can reach any host and read any file ROMarr can.</div>');
+        +'may run without one or both boundaries if you explicitly override '
+        +'this check; check the missing capability before allowing it.</div>');
   // What enabling a searchable plugin actually does now, said out loud:
   // its results join Interactive Search once the ROM Hub download client
   // is configured. Before that existed, the honest sentence was "CLI-only".

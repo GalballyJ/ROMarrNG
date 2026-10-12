@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import ssl
 from pathlib import Path
 import tempfile
@@ -29,6 +30,14 @@ def main():
         from romarr.dat import parse_dat
         from rom_hub.cli import secret_store
 
+        app_state = root / "romarr.json"
+        service = ROMarr({"ROMARR_DATA": str(app_state),
+                          "ROMARR_API_KEY": "proof-api-key", "LIBRARY_KIND": "folder",
+                          "LIBRARY_PATH": str(root / "library")})
+        service.store.settings["_host_only_proof"] = "host-only-proof-key"
+        service.store.save()
+        protected_state_mode = stat.S_IMODE(app_state.stat().st_mode)
+
         payload = b"ROMarrNG acquisition fixture\n" * 1024
         class Source(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -48,6 +57,17 @@ def main():
         os.environ["SSL_CERT_FILE"] = str(cert)
         threading.Thread(target=source.serve_forever, daemon=True).start()
         url = f"https://127.0.0.1:{source.server_port}"
+        shadow_hits = []
+        class ShadowProbe(BaseHTTPRequestHandler):
+            def do_GET(self):
+                shadow_hits.append(self.path)
+                self.send_response(204)
+                self.end_headers()
+            def log_message(self, *args):
+                pass
+        shadow_probe = ThreadingHTTPServer(("127.0.0.1", 0), ShadowProbe)
+        threading.Thread(target=shadow_probe.serve_forever, daemon=True).start()
+        shadow_probe_url = f"http://127.0.0.1:{shadow_probe.server_port}"
         plugin = hub.HOME / "plugins" / "proof"
         plugin.mkdir(parents=True)
         (plugin / "manifest.toml").write_text('''[plugin]
@@ -62,19 +82,88 @@ importer="proof:Provider"
 network=["127.0.0.1"]
 [config.token]
 type="secret"
+[config.state_path]
+type="str"
+[config.hub_state_path]
+type="str"
+[config.secrets_path]
+type="str"
+[config.secret_key_path]
+type="str"
+[config.shadow_probe_url]
+type="str"
 ''' + f'''[[data_assets]]
 name="fixture"
 url="{url}/asset"
 sha256="{hashlib.sha256(payload).hexdigest()}"
 size_bytes={len(payload)}
 ''')
-        (plugin / "proof.py").write_text('''import os, socket
+        (plugin / "proof.py").write_text('''import ctypes, errno, os, socket, threading
 from rom_hub.types import SearchResult, FetchPlan, FetchFile
 class Provider:
     def __init__(self, ctx):
         self.ctx = ctx
         assert "ROMARR_API_KEY" not in os.environ
         assert ctx.config["token"] == "plugin-proof-secret"
+        for key in ("state_path", "hub_state_path", "secrets_path", "secret_key_path"):
+            try:
+                with open(ctx.config[key], "rb") as stream:
+                    stream.read()
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError("plugin read host state: " + key)
+        for path in (ctx.config["state_path"], os.environ["TMPDIR"]):
+            try:
+                os.chmod(path, 0)
+            except PermissionError as exc:
+                assert exc.errno == errno.EPERM
+            else:
+                raise AssertionError("plugin changed host or scratch permissions: " + path)
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.syscall.restype = ctypes.c_long
+        ctypes.set_errno(0)
+        result = libc.syscall(452, -100, os.fsencode(ctx.config["state_path"]), 0o644, 0)
+        if result == 0:
+            raise AssertionError("plugin changed host permissions with fchmodat2")
+        assert ctypes.get_errno() in (errno.EPERM, errno.ENOSYS), \
+            f"fchmodat2 returned unexpected errno {ctypes.get_errno()}"
+        params = ctypes.create_string_buffer(120)
+        for number, args in (
+            (425, (1, ctypes.byref(params))),
+            (426, (-1, 0, 0, 0, ctypes.c_void_p(), 0)),
+            (427, (-1, 0, ctypes.c_void_p(), 0)),
+        ):
+            ctypes.set_errno(0)
+            result = libc.syscall(number, *args)
+            if result >= 0:
+                if number == 425:
+                    os.close(result)
+                raise AssertionError(f"plugin used io_uring syscall {number}")
+            assert ctypes.get_errno() in (errno.EPERM, errno.ENOSYS), \
+                f"io_uring syscall {number} returned unexpected errno {ctypes.get_errno()}"
+        try:
+            child_pid = os.fork()
+        except OSError as exc:
+            assert exc.errno == errno.EPERM
+        else:
+            if child_pid == 0:
+                os._exit(0)
+            os.waitpid(child_pid, 0)
+            raise AssertionError("plugin created a child process")
+        finished = []
+        worker = threading.Thread(target=lambda: finished.append(True))
+        worker.start()
+        worker.join(timeout=2)
+        assert finished == [True], "ordinary threads must remain available"
+        for path in ("/proc/self/environ", f"/proc/{os.getppid()}/environ"):
+            try:
+                with open(path, "rb") as stream:
+                    stream.read()
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError("plugin read process environment: " + path)
         with open(ctx.data_asset("fixture"), "rb") as stream:
             assert stream.read().startswith(b"ROMarrNG acquisition fixture")
         try:
@@ -93,8 +182,35 @@ class Provider:
         return FetchPlan(platform="snes", files=[FetchFile(url=result.url,
             filename="Proof Game (USA).sfc", size_bytes=result.size_bytes)])
 ''')
+        shadow_package = plugin / "rom_hub_sdk"
+        shadow_package.mkdir()
+        (shadow_package / "__init__.py").write_text("", encoding="utf-8")
+        (shadow_package / "runner.py").write_text('''import json, sys, urllib.request
+message = json.loads(sys.stdin.readline())
+config = message["params"]["config"]
+urllib.request.urlopen(
+    config["shadow_probe_url"] + "/" + config["token"], timeout=3
+).read()
+''', encoding="utf-8")
+        (plugin / "sitecustomize.py").write_text(
+            "from pathlib import Path\n"
+            f"state = Path({str(app_state)!r})\n"
+            "try:\n"
+            "    state.read_bytes()\n"
+            "except PermissionError:\n"
+            "    pass\n"
+            "else:\n"
+            f"    Path({str(root / 'sitecustomize-ran.txt')!r}).write_text('read')\n"
+        )
         (hub.HOME / "state.json").write_text(json.dumps({"proof": {
-            "enabled": True, "config": {"url": url, "size": len(payload)}}}))
+            "enabled": True, "config": {
+                "url": url, "size": len(payload),
+                "state_path": str(app_state),
+                "hub_state_path": str(hub.HOME / "state.json"),
+                "secrets_path": str(hub.HOME / "secrets.json"),
+                "secret_key_path": str(hub.HOME / "secret.key"),
+                "shadow_probe_url": shadow_probe_url,
+            }}}))
         secret_store(hub.HOME).set("proof", "token", "plugin-proof-secret")
         assert hub.sandbox_state()[0], hub.sandbox_state()
         import rom_hub.dispatcher as dispatcher
@@ -107,11 +223,13 @@ class Provider:
             return outcome
         dispatcher.search_all = traced_search
         rows, error = hub.search("Proof Game", "snes")
+        assert not shadow_hits, \
+            f"plugin-supplied SDK runner exfiltrated configuration: {shadow_hits}"
         assert not error and len(rows) == 1, (error, rows)
+        assert stat.S_IMODE(app_state.stat().st_mode) == protected_state_mode
+        assert not (root / "sitecustomize-ran.txt").exists(), \
+            "plugin-controlled sitecustomize ran before the filesystem boundary"
 
-        service = ROMarr({"ROMARR_DATA": str(root / "state.json"),
-                          "ROMARR_API_KEY": "proof-api-key", "LIBRARY_KIND": "folder",
-                          "LIBRARY_PATH": str(root / "library")})
         service.store.settings["rescan_after_import"] = False
         service.store.settings["preferred_regions"] = ["usa"]
         service.store.settings["region_mode"] = "strict"
@@ -154,12 +272,14 @@ class Provider:
                 assert str(root) not in json.dumps(result)
                 [asset] = call(f"/requests/proof-{number}/assets")["assets"]
                 assert call(f"/requests/proof-{number}/assets/{asset['id']}", raw=True) == payload
-            print("PASS: sandbox sockets blocked; host credentials isolated; plugin secret and verified asset resolved; broker HTTPS; shared Hub download; strict DAT catalog; two SeerrNG requests imported and streamed exact bytes")
+            print("PASS: sandbox sockets, io_uring, metadata changes and process forks blocked; bounded tmpfs scratch; host credentials isolated; plugin secret and verified asset resolved; broker HTTPS; shared Hub download; strict DAT catalog; two SeerrNG requests imported and streamed exact bytes")
         finally:
             api.shutdown()
             api.server_close()
             source.shutdown()
             source.server_close()
+            shadow_probe.shutdown()
+            shadow_probe.server_close()
 
 
 if __name__ == "__main__":

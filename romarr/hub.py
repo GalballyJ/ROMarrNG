@@ -12,11 +12,51 @@ registry on disk (`$ROM_HUB_HOME`). ROMarr never edits it directly.
 from __future__ import annotations
 
 import dataclasses
+import contextvars
+import json
 import logging
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+_PLUGIN_RUNTIME_CONTEXT = contextvars.ContextVar(
+    "romarr_hub_plugin_runtime", default=None)
+_PLUGIN_RUNTIME_LOCK = threading.Lock()
+_PLUGIN_RUNTIME_INSTALLED = False
+_PLUGIN_BOOTSTRAP = """\
+import os, resource, sys, sysconfig
+file_limit = 64 * 1024 * 1024
+file_soft, file_hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+if file_hard != resource.RLIM_INFINITY:
+    file_limit = min(file_limit, file_hard)
+resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
+cwd = os.path.realpath(os.getcwd())
+sys.path[:] = [p for p in sys.path if p and os.path.realpath(p) != cwd]
+for key in ("purelib", "platlib"):
+    path = sysconfig.get_paths().get(key)
+    if path and path not in sys.path:
+        sys.path.append(path)
+# Do not run .pth or sitecustomize hooks from installed packages before the
+# filesystem policy. The trusted hook is supplied through ROMARR's private
+# PYTHONPATH and installs Landlock before the Hub runner or plugin is loaded.
+import sitecustomize
+# Load the trusted SDK runner and all of its imports before making the plugin
+# directory importable. A plugin can contain a package named rom_hub_sdk or a
+# dependency such as pydantic; neither may run before the SDK installs its own
+# network/exec filter.
+import rom_hub_sdk.runner as trusted_runner
+plugin_dir = os.environ.pop("ROMARR_HUB_PLUGIN_DIR", "")
+if not plugin_dir:
+    raise RuntimeError("ROMarr Hub plugin directory is missing")
+sys.path.insert(0, plugin_dir)
+trusted_runner.main()
+"""
 
 # ROM Hub keeps its state (catalog cache, installed plugins) under this home.
 # ROMarr gives it a stable directory it owns so state survives restarts.
@@ -153,14 +193,27 @@ def sandbox_state() -> tuple[bool, str]:
     """Whether ROM Hub can confine a plugin here, and why not if it cannot.
 
     The Hub runs each plugin as a subprocess whose only route outward is an RPC
-    back to the host, checked against the hosts that plugin declared. That
-    boundary is enforced by a seccomp filter, and the filter needs Linux and
-    `pyseccomp`. Both are ordinary to have; neither was installed, so ROMarr
-    had been opting out of the whole mechanism.
+    back to the host, checked against the hosts that plugin declared. ROMarr
+    adds Landlock filesystem rules to the Hub's seccomp network/exec boundary.
+    Both have to be available before plugin work starts by default.
 
     Reported rather than assumed, so the Plugins page can say which of the two
     states an install is actually in.
     """
+    try:
+        from .plugin_runtime.landlock import probe as probe_landlock
+        files_ok, files_why = probe_landlock()
+        if not files_ok:
+            return False, f"filesystem confinement unavailable: {files_why}"
+    except Exception as err:  # noqa: BLE001
+        return False, f"filesystem confinement probe failed: {err.__class__.__name__}"
+    try:
+        from .plugin_runtime.scratch import probe as probe_scratch
+        scratch_ok, scratch_why = probe_scratch()
+        if not scratch_ok:
+            return False, f"bounded plugin scratch unavailable: {scratch_why}"
+    except Exception as err:  # noqa: BLE001
+        return False, f"plugin scratch probe failed: {err.__class__.__name__}"
     try:
         from rom_hub.sandbox import probe
     except Exception as err:  # noqa: BLE001 - the Hub may not be installed
@@ -188,13 +241,134 @@ def _plugin_env() -> dict:
         if os.environ.get("ROMARR_ALLOW_UNSANDBOXED_PLUGINS") != "1":
             raise RuntimeError(
                 "ROM Hub plugin confinement is unavailable: " + why
-                + ". Install pyseccomp/enable seccomp, or explicitly set "
+                + ". Enable Linux Landlock, a finite tmpfs for plugin scratch, "
+                "and pyseccomp, or explicitly set "
                 "ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1 to run without it.")
         log.warning("running plugins WITHOUT confinement by explicit operator "
                     "choice: %s", why)
         env["ROM_HUB_ALLOW_UNSANDBOXED"] = "1"
     env.update(_backend_env())
     return env
+
+
+def _plugin_runtime_context(process) -> dict:
+    """Private paths the child may use during one PluginProcess lifetime."""
+    runtime_dir = Path(__file__).with_name("plugin_runtime").resolve(strict=True)
+    if not (runtime_dir / "sitecustomize.py").is_file():
+        raise RuntimeError("trusted ROMarr plugin bootstrap is missing")
+
+    plugin_dir = Path(process.plugin_dir).resolve(strict=True)
+    plugin_root = (HOME / "plugins").resolve(strict=True)
+    if not plugin_dir.is_dir() or plugin_dir == plugin_root \
+            or not plugin_dir.is_relative_to(plugin_root):
+        raise RuntimeError("installed plugin path escapes the ROM Hub plugin directory")
+
+    assets = []
+    for value in (getattr(process, "data_assets", {}) or {}).values():
+        asset = Path(value).resolve(strict=True)
+        if not asset.is_file():
+            raise RuntimeError("ROM Hub data asset is not a regular file")
+        assets.append(str(asset))
+
+    from .plugin_runtime.scratch import tmpfs_root
+    scratch = Path(tempfile.mkdtemp(
+        prefix="romarr-hub-plugin-", dir=str(tmpfs_root()))).resolve()
+    os.chmod(scratch, 0o700)
+    child_env = {
+        "HOME": str(scratch),
+        "TMPDIR": str(scratch),
+        "TEMP": str(scratch),
+        "TMP": str(scratch),
+        "PYTHONPATH": str(runtime_dir),
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "ROMARR_HUB_LANDLOCK": "1",
+        "ROMARR_HUB_PLUGIN_DIR": str(plugin_dir),
+        "ROMARR_HUB_DATA_ASSETS": json.dumps(assets),
+        "ROMARR_HUB_SCRATCH": str(scratch),
+    }
+    return {"plugin_dir": plugin_dir, "scratch": scratch,
+            "child_env": child_env}
+
+
+def _remove_plugin_scratch(process) -> None:
+    scratch = getattr(process, "_romarr_plugin_scratch", None)
+    if scratch:
+        shutil.rmtree(scratch, ignore_errors=True)
+        process._romarr_plugin_scratch = None
+
+
+def _install_plugin_runtime_hardening(plugin_process, broker_host) -> None:
+    """Make every Hub plugin start through the trusted Landlock bootstrap.
+
+    ROM Hub's own runner installs seccomp before importing plugin code. Its
+    current command starts Python from the plugin directory, though, which
+    would allow a plugin-provided ``sitecustomize.py`` to run before that
+    filter. This wrapper removes the working directory from ``sys.path`` and
+    calls the trusted ``sitecustomize`` under ``-S`` before loading the SDK
+    runner. The runner's package and imports are resolved while only trusted
+    paths are available; plugin imports are enabled only afterward. ContextVars
+    keep per-plugin paths isolated across Hub's fan-out threads.
+    """
+    global _PLUGIN_RUNTIME_INSTALLED
+    if _PLUGIN_RUNTIME_INSTALLED:
+        return
+    with _PLUGIN_RUNTIME_LOCK:
+        if _PLUGIN_RUNTIME_INSTALLED:
+            return
+
+        original_environment = broker_host.plugin_environment
+        original_start = plugin_process.start
+        original_close = plugin_process.close
+        original_popen = subprocess.Popen
+
+        def plugin_environment(base=None):
+            env = original_environment(base)
+            runtime = _PLUGIN_RUNTIME_CONTEXT.get()
+            if runtime is not None:
+                env.update(runtime["child_env"])
+            return env
+
+        def guarded_popen(args, *args_tail, **kwargs):
+            runtime = _PLUGIN_RUNTIME_CONTEXT.get()
+            if runtime is None:
+                return original_popen(args, *args_tail, **kwargs)
+            expected = [sys.executable, "-m", "rom_hub_sdk.runner"]
+            cwd = kwargs.get("cwd")
+            try:
+                resolved_cwd = Path(cwd).resolve(strict=True)
+            except (OSError, TypeError):
+                resolved_cwd = None
+            if list(args) != expected or resolved_cwd != runtime["plugin_dir"]:
+                raise RuntimeError("unsupported ROM Hub plugin runner command")
+            return original_popen(
+                [sys.executable, "-S", "-c", _PLUGIN_BOOTSTRAP],
+                *args_tail, **kwargs,
+            )
+
+        def start_confined(process):
+            runtime = _plugin_runtime_context(process)
+            process._romarr_plugin_scratch = runtime["scratch"]
+            token = _PLUGIN_RUNTIME_CONTEXT.set(runtime)
+            try:
+                return original_start(process)
+            except BaseException:
+                _remove_plugin_scratch(process)
+                raise
+            finally:
+                _PLUGIN_RUNTIME_CONTEXT.reset(token)
+
+        def close_confined(process):
+            try:
+                return original_close(process)
+            finally:
+                _remove_plugin_scratch(process)
+
+        broker_host.plugin_environment = plugin_environment
+        plugin_process.start = start_confined
+        plugin_process.close = close_confined
+        subprocess.Popen = guarded_popen
+        _PLUGIN_RUNTIME_INSTALLED = True
 
 
 def _run_cli(*args, timeout=180):
@@ -206,8 +380,8 @@ def _run_cli(*args, timeout=180):
 
     This subprocess manages the registry; installed plugin code runs later in
     the Hub's own worker boundary. `_plugin_env` refuses to start the CLI when
-    seccomp is unavailable unless the operator has explicitly accepted an
-    unconfined plugin runtime.
+    filesystem or seccomp confinement is unavailable unless the operator has
+    explicitly accepted an unconfined plugin runtime.
     """
     import subprocess
     import sys
@@ -336,11 +510,17 @@ def search(query: str, platform: str | None = None, limit: int = 25,
     """
     try:
         from rom_hub import registry as _registry
+        from rom_hub.broker import host as _broker_host
+        from rom_hub.broker.host import PluginProcess
         from rom_hub.broker.fetcher import HttpxFetcher
         from rom_hub.dispatcher import search_all
         from rom_hub.cli import prepare_assets, prepare_secrets
     except Exception as exc:
         return [], f"ROM Hub is not installed: {exc}"
+    try:
+        _install_plugin_runtime_hardening(PluginProcess, _broker_host)
+    except Exception as exc:
+        return [], f"ROM Hub filesystem confinement could not start ({type(exc).__name__})"
     try:
         plugins = [p for p in _registry.Registry(HOME).installed()
                    if getattr(p, "enabled", True)
@@ -386,6 +566,7 @@ def fetch(row: dict, dest_dir) -> dict:
     from pathlib import Path
     try:
         from rom_hub import registry as _registry
+        from rom_hub.broker import host as _broker_host
         from rom_hub.broker.fetcher import HttpxFetcher
         from rom_hub.broker.host import PluginProcess
         from rom_hub.importer import HttpDownloader
@@ -393,6 +574,12 @@ def fetch(row: dict, dest_dir) -> dict:
         from rom_hub.cli import prepare_assets, prepare_secrets
     except Exception as exc:
         return {"ok": False, "error": f"ROM Hub is not installed: {exc}",
+                "files": []}
+    try:
+        _install_plugin_runtime_hardening(PluginProcess, _broker_host)
+    except Exception as exc:
+        return {"ok": False,
+                "error": f"ROM Hub filesystem confinement could not start ({type(exc).__name__})",
                 "files": []}
     slug = str(row.get("plugin") or "")
     try:

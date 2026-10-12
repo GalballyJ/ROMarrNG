@@ -235,6 +235,25 @@ def test_switch_collection_start_queues_only_the_filtered_missing_versions(tmp_p
     assert batch.queue == [f"The Legend of Zelda: Breath of the Wild [{BOTW_BASE}] [v0]"]
 
 
+def test_titledb_initializes_without_dat_path_and_loads_on_first_switch_use(
+    tmp_path, monkeypatch
+):
+    from romarr import app as app_module
+    from romarr.app import ROMarr
+
+    loaded = _index()
+    calls = []
+    monkeypatch.setattr(app_module, "build_titled_index",
+                        lambda: (calls.append(True) or loaded))
+    service = ROMarr(env={"ROMARR_DATA": str(tmp_path / "state.json")})
+    assert isinstance(service.titled, TitleDBIndex)
+    assert service.titled.titles == {}
+    assert service._titled_loaded is False
+    assert service.ensure_titled() is loaded
+    assert service.ensure_titled() is loaded
+    assert calls == [True]
+
+
 def test_switch_requested_id_and_version_are_hard_selection_constraints():
     from romarr.selection import Release, judge
     platform = resolve("switch")
