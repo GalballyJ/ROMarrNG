@@ -1137,3 +1137,27 @@ just plausible.
 MIT — see [LICENSE](LICENSE).
 
 Unofficial. Not affiliated with or endorsed by the RomM, Gaseous or Retrom projects.
+
+### Upstream backlog coverage
+
+See [the upstream audit](docs/UPSTREAM_AUDIT.md) for the issue-by-issue inventory,
+implementation evidence, attribution, and deployment checks still needed.
+
+In **Collections**, choose **TitleDB (Switch)** to preview a set by title name or
+ID, select base games, updates or DLC, and request the latest listed versions
+or all listed versions. Name searches require `TITLED_NAMES=1`; ID searches work
+with the default catalogue. Presence is inferred from filename IDs and version
+tags and never reported as checksum verification.
+
+DAT collections also offer **Only selected regions** and configurable
+fan-translation languages; preference fallback and English remain the defaults.
+
+To use installed Hub sources in search, enable a plugin with search capability
+and add a **ROM Hub** client under Download Clients with a writable staging
+path. Fetches enter the normal import pipeline. Missing plugin confinement
+requires the same explicit operator opt-in as other Hub actions.
+
+SeerrNG's DAT catalog and acquisition use these saved region and translation settings.
+Each request receives its own status and assets even when requests share a download.
+The packaged integration proof is `scripts/prove_upstream_acquisition.py`; CI runs it
+against both image editions before publishing.

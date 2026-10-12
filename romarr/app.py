@@ -57,12 +57,12 @@ from .libraries import (
 from .clients import QBittorrent, QbitConfig, Romm, RommConfig
 from . import hub  # ROM Hub bridge -- the Cartridge plugin layer
 from .dat import DatIndex, parse_dat
-from .dat_catalog import dat_catalog_game, dat_catalog_page, dat_catalog_platforms
+from .dat_catalog import catalog_policy, dat_catalog_game, dat_catalog_page, dat_catalog_platforms
 from .decompress import run_batch as run_decompress_batch, scan_compressed
 from .titled import TitleDBIndex, build_index as build_titled_index, validate_switch_rom
 from .downloaders import (
     CLIENT_TYPES, NZBGet, NzbgetConfig, SABnzbd, SabConfig, build_client,
-    hand_off_with_id, match_queue_item, merge_secrets, pick_client, redact,
+    hand_off_with_id, match_queue_item, matching_queue_items, merge_secrets, pick_client, redact,
 )
 from .indexers import INDEXER_TYPES, build_indexer, redact_indexer
 from .indexers import Prowlarr, ProwlarrConfig
@@ -1819,6 +1819,9 @@ class ROMarr:
             except Exception as err:
                 log.warning("prowlarr search failed for %r: %s", game, err)
                 releases = []
+            # The hub lane joins here too, or this endpoint answers a
+            # different question than the request path it claims to mirror.
+            releases = releases + self._hub_releases(game, None)
         pick = best_release(releases, game, platform,
                            profile=self.profile, blocklist=self.blocklist)
         scored = sorted(
@@ -1855,6 +1858,70 @@ class ROMarr:
                      "indexer": r.indexer, "private": r.private}
                     for s, r in scored[:5]],
         }
+
+    def _hub_enabled(self) -> bool:
+        """Whether the hub acquisition lane is wired up.
+
+        Both halves are required: an enabled plugin that declares `search`
+        (something to ask) and a configured ROM Hub download client
+        (somewhere to stage what comes back). Results that cannot be grabbed
+        are noise on a search page, so the lane stays quiet until both exist.
+        """
+        if not any(getattr(c, "protocol", "") == "hub"
+                   and getattr(c, "configured", False)
+                   for c in self.clients):
+            return False
+        return bool(hub.searchable_plugins())
+
+    def _hub_releases(self, game: str, platform=None) -> list:
+        """ROM Hub plugin results as Releases, for the same pipeline.
+
+        The plugin's result row rides inside a `hub://` download_url -- the
+        queue and the client ledger only ever carry strings, and the row is
+        what the plugin needs to produce a FetchPlan later. The plugin slug
+        is the indexer, so Interactive Search shows where a result came from
+        without a special case.
+        """
+        if not self._hub_enabled():
+            return []
+        from .selection import Release
+        try:
+            rows, err = hub.search(game,
+                                   platform=platform.slug if platform else None)
+        except Exception as exc:
+            log.warning("rom hub search failed for %r: %s", game, exc)
+            return []
+        if err:
+            log.warning("rom hub search unavailable: %s", err)
+            return []
+        out = []
+        for row in rows:
+            if not row.get("title") or not row.get("source_id") or not row.get("plugin"):
+                continue
+            declared_platform = resolve(str(row.get("platform") or ""))
+            if platform and row.get("platform") and (
+                    declared_platform is None or declared_platform.slug != platform.slug):
+                continue
+            try:
+                size = max(0, int(row.get("size_bytes") or 0))
+                encoded = hub.encode_result(row)
+            except (ValueError, TypeError):
+                continue
+            out.append(Release(
+                title=row["title"],
+                size=size,
+                seeders=0,
+                # A plugin result is a game by definition -- it came from a
+                # ROM source. 1000 is the console range the scorer accepts;
+                # inventing a category would make `is_game_release` reject
+                # every row the Hub returned.
+                categories=(1000,),
+                download_url=encoded,
+                protocol="hub",
+                indexer=f"hub:{row.get('plugin') or 'plugin'}",
+                info_url=str(row.get("url") or ""),
+            ))
+        return out
 
     def _search_releases(self, game: str, platform) -> list:
         """Find releases for a game, favouring recall over a tidy query.
@@ -1893,6 +1960,15 @@ class ROMarr:
                         continue
                     seen.add(key)
                     merged.append(release)
+        # Enabled ROM Hub plugins are searched alongside the indexers: the
+        # same titles, scored by the same rules, grabbable from the same
+        # Interactive Search page. One query, not per-term: the Hub's own
+        # fan-out already merges every plugin's answer for it.
+        for release in self._hub_releases(game, platform):
+            key = (release.title, release.download_url)
+            if key not in seen:
+                seen.add(key)
+                merged.append(release)
         return merged
 
     def request(self, game: str, platform_name: str,
@@ -1901,12 +1977,19 @@ class ROMarr:
         if platform is None:
             return {"ok": False, "error": f"unknown platform: {platform_name!r}"}
 
-        releases = self._search_releases(game, platform)
+        search_game = game
         if external_request_id:
             request = self.store.get_seerr_request(external_request_id)
             if request is None or request.status == "cancelled":
                 return {"ok": False, "cancelled": True}
-        pick = best_release(releases, game, platform,
+            if request.catalog_provider == "dat":
+                selected = dat_catalog_game(self.dats.dats, request.catalog_key,
+                                            policy=catalog_policy(self.store.settings))
+                if selected is None:
+                    return {"ok": False, "error": "DAT title is no longer allowed by the catalog policy"}
+                search_game = selected["dat"]["entry"]
+        releases = self._search_releases(search_game, platform)
+        pick = best_release(releases, search_game, platform,
                            profile=self.profile, blocklist=self.blocklist)
         if pick is None:
             if external_request_id and not self.store.mark_seerr_dispatching(
@@ -1997,7 +2080,8 @@ class ROMarr:
                          size=getattr(pick, "size", 0),
                          release_fault=not ok,
                          external_request_id=external_request_id,
-                         download_id=download_id)
+                         download_id=download_id,
+                         download_client_id=str(getattr(client, "config_id", "") or ""))
         self.store.enqueue(item)
         if external_request_id:
             self.store.update_seerr_request(
@@ -2053,8 +2137,19 @@ class ROMarr:
                     "items": []}
 
         try:
-            releases = (self._search_releases(game, platform) if platform
-                        else self.prowlarr.search(game))
+            if platform:
+                releases = self._search_releases(game, platform)
+            else:
+                search_error = None
+                try:
+                    releases = self.prowlarr.search(game)
+                except Exception as err:
+                    log.warning("prowlarr interactive search failed: %s", type(err).__name__)
+                    search_error = err
+                    releases = []
+                releases += self._hub_releases(game, None)
+                if search_error is not None and not releases:
+                    raise search_error
         except Exception as err:
             log.warning("interactive search failed for %r: %s", game, err)
             return {"error": f"search failed: {type(err).__name__}",
@@ -2610,6 +2705,16 @@ class ROMarr:
             hollow = looks_hollow(row.get("path", ""))
             if hollow:
                 row["hollow"] = hollow
+            if row.get("platform") == "switch":
+                catalogue = validate_switch_rom(row.get("filename", ""),
+                                               index=getattr(self, "titled", None))
+                title = catalogue.pop("title", None)
+                catalogue["title"] = asdict(title) if title is not None else None
+                catalogue["checksum_verified"] = False
+                if catalogue.get("status") == "verified":
+                    catalogue["status"] = "known_title_id"
+                    catalogue["details"] = "Title ID is in TitleDB; file bytes are not verified"
+                row["catalogue"] = catalogue
             rows.append(row)
         return {
             "candidates": rows,
@@ -2815,12 +2920,21 @@ class ROMarr:
         return present
 
     def dat_names(self) -> list[str]:
-        return [d.name for d in self.dats.dats if d.name]
+        from .titled import SWITCH_COLLECTION
+        return [d.name for d in self.dats.dats if d.name] + [SWITCH_COLLECTION]
 
     def collection_plan(self, dat_name: str = "", platform: str = "",
                         **policy_kw) -> dict:
         """The set report: expected, present, missing, and why each dump won."""
         from .collections import Policy, build_plan
+        from .titled import SWITCH_COLLECTION, collection_plan as switch_plan
+        if dat_name == SWITCH_COLLECTION:
+            return switch_plan(getattr(self, "titled", TitleDBIndex()),
+                               self._present_titles("switch"),
+                               query=policy_kw.get("query", ""),
+                               kinds=policy_kw.get("kinds", "base"),
+                               latest_only=policy_kw.get("latest_only", True))
+
 
         dat = next((d for d in self.dats.dats if d.name == dat_name),
                    None) or (self.dats.dats[0] if self.dats.dats else None)
@@ -2843,11 +2957,25 @@ class ROMarr:
         translation_policy = (policy_kw.get("translation_policy")
                               or self.store.settings.get("translation_policy")
                               or "exclude")
+        translation_langs = (policy_kw.get("translation_langs")
+                             or self.store.settings.get("translation_langs")
+                             or ("en",))
+        if isinstance(translation_langs, str):
+            translation_langs = [c for c in translation_langs.split(",") if c]
+        from .collections import normalise_lang
+        translation_langs = tuple(dict.fromkeys(
+            normalise_lang(c) for c in translation_langs if str(c).strip()))
+        region_mode = str(policy_kw.get("region_mode")
+                          or self.store.settings.get("region_mode")
+                          or "prefer").lower()
         policy = Policy(
             regions=regions,
             one_game_one_rom=bool(policy_kw.get("one_game_one_rom", True)),
             exclude=frozenset(exclude),
             translation_policy=str(translation_policy),
+            translation_langs=translation_langs,
+            region_mode=region_mode if region_mode in ("prefer", "strict")
+            else "prefer",
         )
         plan = build_plan(dat, self._present_titles(platform), policy)
         return {
@@ -2858,7 +2986,9 @@ class ROMarr:
             "policy": {"regions": list(policy.regions),
                        "one_game_one_rom": policy.one_game_one_rom,
                        "exclude": sorted(policy.exclude),
-                       "translation_policy": policy.translation_policy},
+                       "translation_policy": policy.translation_policy,
+                       "translation_langs": list(policy.translation_langs),
+                       "region_mode": policy.region_mode},
             "titles": [
                 {"name": t.name, "parent": t.parent, "status": t.status,
                  "why": t.chosen_because,
@@ -2888,7 +3018,7 @@ class ROMarr:
         if not missing:
             return {"ok": True, "message": "nothing missing", "queued": 0}
 
-        batch = Batch(id=uuid.uuid4().hex[:12], platform=platform,
+        batch = Batch(id=uuid.uuid4().hex[:12], platform=plan.get("platform") or platform,
                       dat=plan["dat"], status=BATCH_PENDING,
                       queue=missing, per_pass=max(1, int(per_pass)))
         self.store.put_item("batches", batch.to_dict())
@@ -4771,6 +4901,15 @@ class ROMarr:
                 client_id = str(getattr(client, "config_id", "") or "")
                 finished.extend((item, client_id)
                                 for item in client.completed())
+                if getattr(client, "protocol", "") == "hub":
+                    for failure in client.failed():
+                        with self._lock:
+                            for item in matching_queue_items(self.queue, failure, client_id=client_id):
+                                if item.state == "grabbed":
+                                    item.state = "failed"
+                                    item.detail = failure["detail"]
+                                    # Configuration failures do not condemn the release.
+                                    item.release_fault = False
             except Exception as err:
                 # One unreachable client must not stop the others importing.
                 log.warning("%s completed() failed: %s", getattr(client, "name", client), err)
@@ -4787,7 +4926,7 @@ class ROMarr:
             platform = None
             queue_item = None
             with self._lock:
-                match = match_queue_item(self.queue, torrent)
+                match = match_queue_item(self.queue, torrent, client_id=client_id)
                 if match is not None:
                     queue_item = match
                     if match.state not in ("imported", "import-failed"):
@@ -4809,8 +4948,11 @@ class ROMarr:
                 self.store.record(Event(kind="failed", game=name,
                                         platform=platform.slug, detail=detail))
                 results.append({"name": name, "ok": False, "reason": detail})
-                if queue_item is not None:
-                    queue_item.state = "import-failed"
+                with self._lock:
+                    for item in matching_queue_items(self.queue, torrent, client_id=client_id):
+                        if item.state == "grabbed" and item.platform == platform.slug:
+                            item.state = "import-failed"
+                            item.detail = detail
                 continue
             target_cfg, target_lib = target
             label = target_cfg.get("name") or getattr(target_lib, "name", "library")
@@ -4818,20 +4960,19 @@ class ROMarr:
             outcomes = import_rom(
                 path, platform, self.library_root(target_cfg),
                 layout=self.library_layout(target_cfg),
-                translation=is_translation(name))
+                translation=is_translation(queue_item.release if queue_item else name))
             if not outcomes:
                 self.store.record(Event(kind="failed", game=name,
                                         platform=platform.slug,
                                         detail="no ROMs found in download"))
                 results.append({"name": name, "ok": False,
                                 "reason": "no ROMs found", "library": label})
-                if queue_item is not None:
-                    queue_item.state = "import-failed"
-                    # The one import failure that is the release's doing: it
-                    # downloaded fine and held no game. A path that does not
-                    # exist or a full disc is the install's problem and must
-                    # not cost the release a place on the blocklist.
-                    queue_item.release_fault = True
+                with self._lock:
+                    for item in matching_queue_items(self.queue, torrent, client_id=client_id):
+                        if item.state == "grabbed" and item.platform == platform.slug:
+                            item.state = "import-failed"
+                            item.detail = "no ROMs found in download"
+                            item.release_fault = True
                 continue
 
             any_ok = any(o.ok for o in outcomes)
@@ -4863,12 +5004,28 @@ class ROMarr:
                 queue_item.imported_paths = [str(outcome.destination.resolve())
                                              for outcome in outcomes
                                              if outcome.ok and outcome.destination]
+            if queue_item is not None:
+                with self._lock:
+                    for sibling in matching_queue_items(self.queue, torrent, client_id=client_id):
+                        if (sibling is queue_item or sibling.platform != queue_item.platform
+                                or sibling.state != "grabbed"):
+                            continue
+                        sibling_ok = any_ok and (not sibling.external_request_id
+                                                or all(o.ok for o in outcomes))
+                        sibling.state = "imported" if sibling_ok else "import-failed"
+                        sibling.detail = "" if sibling_ok else "incomplete game import"
+                        sibling.imported_paths = list(queue_item.imported_paths)
+                        if sibling_ok:
+                            self.store.fulfil(sibling.game, sibling.platform)
             if any_ok:
                 if self.store.settings.get("rescan_after_import", True):
                     target_lib.rescan(platform.slug)
-                for w in list(self.store.wanted):
-                    if request_ok and w.platform == platform.slug and w.game.lower() in name.lower():
-                        self.store.fulfil(w.game, w.platform)
+                if request_ok and queue_item is not None:
+                    self.store.fulfil(queue_item.game, platform.slug)
+                elif request_ok:
+                    for w in list(self.store.wanted):
+                        if w.platform == platform.slug and w.game.lower() in name.lower():
+                            self.store.fulfil(w.game, w.platform)
             results.append({"name": name, "ok": request_ok,
                             "reason": "" if request_ok else next(
                                 (outcome.reason for outcome in outcomes if not outcome.ok),
@@ -5282,11 +5439,11 @@ def make_handler(service: ROMarr):
                     regions = ["usa", "world", "europe", "japan"]
                 if route.path == "/api/v1/integration/catalog/dat/platforms":
                     return self._json(
-                        200, dat_catalog_platforms(service.dats.dats, regions)
+                        200, dat_catalog_platforms(service.dats.dats, regions, policy=catalog_policy(service.store.settings))
                     )
                 if route.path.startswith(dat_game_prefix):
                     key = unquote(route.path[len(dat_game_prefix):])
-                    game = dat_catalog_game(service.dats.dats, key, regions)
+                    game = dat_catalog_game(service.dats.dats, key, regions, policy=catalog_policy(service.store.settings))
                     return self._json(200, game) if game else self._json(
                         404, {"error": "DAT catalog title not found"}
                     )
@@ -5315,6 +5472,7 @@ def make_handler(service: ROMarr):
                             platform_slugs=platform_slugs,
                             query=term,
                             preferred_regions=regions,
+                            policy=catalog_policy(service.store.settings),
                         )
                         return self._json(200, {
                             "results": rows,
@@ -5329,6 +5487,7 @@ def make_handler(service: ROMarr):
                         offset=offset,
                         platform_slugs=platform_slugs,
                         preferred_regions=regions,
+                            policy=catalog_policy(service.store.settings),
                     )
                     return self._json(200, {
                         "results": rows,
@@ -5712,11 +5871,18 @@ def make_handler(service: ROMarr):
                 return self._json(200, service.collection_plan(
                     query.get("dat", [""])[0],
                     query.get("platform", [""])[0],
+                    query=query.get("query", [""])[0],
+                    kinds=query.get("kinds", ["base"])[0],
+                    latest_only=query.get("latest_only", ["1"])[0] != "0",
                     one_game_one_rom=query.get("onegame", ["1"])[0] != "0",
                     regions=[r for r in query.get("regions", [""])[0].split(",")
                              if r] or None,
                     translation_policy=query.get("translation_policy",
                                                  [""])[0] or None,
+                    translation_langs=[
+                        c for c in query.get("translation_langs", [""])[0]
+                        .split(",") if c] or None,
+                    region_mode=query.get("region_mode", [""])[0] or None,
                     exclude=[e for e in query.get("exclude", [""])[0].split(",")
                              if e] if "exclude" in query else None))
             if route.path == "/api/v1/collection":
@@ -5980,9 +6146,21 @@ def make_handler(service: ROMarr):
                 # know before installing one, so it travels with the
                 # availability answer instead of hiding in a startup log.
                 confined, why = hub.sandbox_state()
+                searchable = hub.searchable_plugins()
+                lane_ready = service._hub_enabled()
                 return self._json(200, {"available": hub.available(),
                                         "sandboxed": confined,
-                                        "sandbox_detail": why})
+                                        "sandbox_detail": why,
+                                        "searchable_plugins": searchable,
+                                        # The Plugins page says out loud what
+                                        # enabling a plugin now does: its
+                                        # results join Interactive Search,
+                                        # provided the ROM Hub download client
+                                        # is configured to stage the fetches.
+                                        "acquisition": ("ready" if lane_ready
+                                                        else ("no ROM Hub download client configured"
+                                                              if searchable else
+                                                              "no enabled plugin declares search"))})
             if route.path in ("/api/search", "/api/v1/search"):
                 game = (query.get("game") or [""])[0]
                 if not game:
@@ -6114,6 +6292,7 @@ def make_handler(service: ROMarr):
                         service.dats.dats,
                         catalog_key,
                         service.store.settings.get("preferred_regions"),
+                        policy=catalog_policy(service.store.settings),
                     )
                     if (selected is None
                             or selected["platformOptions"][0]["key"] != platform.slug
@@ -6306,9 +6485,14 @@ def make_handler(service: ROMarr):
                     str(body.get("dat") or ""),
                     str(body.get("platform") or ""),
                     int(body.get("per_pass") or 5),
+                    query=body.get("query", ""),
+                    kinds=body.get("kinds", "base"),
+                    latest_only=bool(body.get("latest_only", True)),
                     one_game_one_rom=bool(body.get("one_game_one_rom", True)),
                     regions=body.get("regions") or None,
                     translation_policy=body.get("translation_policy") or None,
+                    translation_langs=body.get("translation_langs") or None,
+                    region_mode=body.get("region_mode") or None,
                     exclude=body.get("exclude")
                     if body.get("exclude") is not None else None))
             if route.path == "/api/v1/collection/step":

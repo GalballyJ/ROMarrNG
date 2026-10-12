@@ -27,7 +27,12 @@ from . import config
 
 ENGINE_VERSION = 1
 ROOT = Path(__file__).resolve().parents[2]
-SECRET_ENV = re.compile(r"(?:TOKEN|PASSWORD|SECRET|API[_-]?KEY|CREDENTIAL|COOKIE|AUTH|DATABASE_URL|DB_PASS|AWS_|AZURE_|GCP_)", re.I)
+INHERITED_ENVIRONMENT_KEYS = frozenset({
+    "ASDF_DATA_DIR", "ASDF_DIR", "COMSPEC", "LANG", "LC_ALL", "LC_CTYPE",
+    "MISE_DATA_DIR", "MISE_HOME", "PATH", "PATHEXT", "PYENV_ROOT",
+    "SYSTEMROOT", "TZ", "WINDIR",
+})
+APPROVED_TASK_PASS_ENVIRONMENT: dict[str, frozenset[str]] = {}
 IGNORED_DIRS = {".git", ".pytest_cache", "__pycache__", ".venv", "venv", "node_modules", "_output", "_tests", "TestResults", "coverage"}
 PROGRESS_INTERVAL_SECONDS = 60
 
@@ -139,10 +144,25 @@ def command_available(command: str) -> bool:
     return which(command) is not None
 
 
+def inherited_toolchain_environment(inherited: dict[str, str] | None = None) -> dict[str, str]:
+    source = os.environ if inherited is None else inherited
+    values: dict[str, str] = {}
+    for key, value in source.items():
+        normalized = key.upper()
+        if normalized not in INHERITED_ENVIRONMENT_KEYS or not isinstance(value, str):
+            continue
+        if normalized not in values or key == normalized:
+            values[normalized] = value
+    return values
+
+
 def validate_config() -> None:
     task_ids = [task.get("id") for task in config.TASKS]
-    if any(not isinstance(item, str) or not item for item in task_ids) or len(set(task_ids)) != len(task_ids):
-        raise ValidationError("Validation task IDs must be unique non-empty strings.")
+    if any(
+        not isinstance(item, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*", item) is None
+        for item in task_ids
+    ) or len(set(task_ids)) != len(task_ids):
+        raise ValidationError("Validation task IDs must be unique safe lowercase identifiers.")
     lane_ids = {rule.get("id") for rule in config.INVENTORY}
     if len(lane_ids) != len(config.INVENTORY):
         raise ValidationError("Test inventory lane IDs must be unique.")
@@ -153,6 +173,12 @@ def validate_config() -> None:
             raise ValidationError("Validation tasks must use a native executable and argument array: " + str(task.get("id")))
         if task.get("kind") == "test" and (task.get("minimum_cases", 0) < 1 or task.get("parser") != "pytest"):
             raise ValidationError("Test tasks require a native result parser and a positive case minimum: " + task["id"])
+        pass_env = task.get("pass_env", [])
+        if not isinstance(pass_env, list) or any(
+            not isinstance(name, str) or name not in APPROVED_TASK_PASS_ENVIRONMENT.get(task["id"], frozenset())
+            for name in pass_env
+        ):
+            raise ValidationError("Validation task requests an unapproved inherited environment variable: " + task["id"])
         for lane in task.get("inventory_lanes", []):
             if lane not in lane_ids:
                 raise ValidationError(f"Unknown inventory lane: {task['id']}/{lane}")
@@ -186,7 +212,15 @@ def runtime_receipt(root: Path) -> dict[str, Any]:
     output = ""
     status = None
     if available:
-        result = subprocess.run(command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
+        result = subprocess.run(
+            command,
+            cwd=root,
+            env=inherited_toolchain_environment(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
         output, status = result.stdout.strip(), result.returncode
     compatible = bool(re.match(r"^Python 3\.13\.\d+$", output))
     return {
@@ -286,10 +320,46 @@ def create_plan(root: Path, options: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
-def sanitized_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
-    environment = {key: value for key, value in os.environ.items() if not SECRET_ENV.search(key)}
-    environment.update({"NO_COLOR": "1", "CI": environment.get("CI", "true")})
-    environment.update(extra or {})
+def isolated_task_environment(
+    task: dict[str, Any],
+    run_root: Path,
+    inherited: dict[str, str] | None = None,
+) -> dict[str, str]:
+    task_id = task.get("id")
+    if not isinstance(task_id, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*", task_id) is None:
+        raise ValidationError("Validation task ID must be a safe lowercase identifier.")
+    source = os.environ if inherited is None else inherited
+    environment = inherited_toolchain_environment(source)
+
+    approved_pass_env = APPROVED_TASK_PASS_ENVIRONMENT.get(task.get("id"), frozenset())
+    pass_env = task.get("pass_env", [])
+    if not isinstance(pass_env, list) or any(
+        not isinstance(name, str) or name not in approved_pass_env for name in pass_env
+    ):
+        raise ValidationError("Validation task requests an unapproved inherited environment variable: " + str(task.get("id")))
+    for name in pass_env:
+        match = next((value for key, value in source.items() if key.upper() == name.upper()), None)
+        if isinstance(match, str):
+            environment[name] = match
+    environment.update({key: value for key, value in task.get("env", {}).items() if isinstance(value, str)})
+
+    environment_root = run_root / f"{task_id}-environment"
+    directories = {
+        "HOME": environment_root / "home",
+        "USERPROFILE": environment_root / "home",
+        "TMPDIR": environment_root / "tmp",
+        "TMP": environment_root / "tmp",
+        "TEMP": environment_root / "tmp",
+        "XDG_CONFIG_HOME": environment_root / "xdg-config",
+        "XDG_CACHE_HOME": environment_root / "xdg-cache",
+        "APPDATA": environment_root / "AppData" / "Roaming",
+        "LOCALAPPDATA": environment_root / "AppData" / "Local",
+        "PIP_CACHE_DIR": environment_root / "pip-cache",
+    }
+    for directory in set(directories.values()):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    environment.update({key: str(value) for key, value in directories.items()})
+    environment.update({"CI": "true", "NO_COLOR": "1", "PYTHONNOUSERSITE": "1"})
     return environment
 
 
@@ -326,7 +396,7 @@ def format_validation_progress(repository: str, tasks: list[dict[str, Any]], res
 def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]:
     start = time.monotonic()
     started_at = utc_now()
-    env = sanitized_environment(task.get("env"))
+    env = isolated_task_environment(task, log_path.parent)
     proc = subprocess.Popen(
         task["command"],
         cwd=root,

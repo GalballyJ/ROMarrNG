@@ -79,9 +79,25 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  acquisition-proof:
+    name: Packaged acquisition (${{ matrix.dockerfile }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dockerfile: [Dockerfile, Dockerfile.browser]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build native test image
+        run: docker build --build-arg TARGETARCH=amd64 -f "${{ matrix.dockerfile }}" -t romarrng:acquisition-proof .
+      - name: Prove sandboxed acquisition and SeerrNG delivery
+        run: >-
+          docker run --rm -e PYTHONPATH=/app --entrypoint python
+          -v "$PWD/scripts:/proof:ro" romarrng:acquisition-proof
+          /proof/prove_upstream_acquisition.py
+
   image:
-    needs: [test, release-notes]
-    if: always() && needs.test.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped')
+    needs: [test, release-notes, acquisition-proof]
+    if: always() && needs.test.result == 'success' && needs.acquisition-proof.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: read

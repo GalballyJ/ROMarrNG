@@ -35,6 +35,7 @@ import re
 import secrets
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -2997,6 +2998,271 @@ def _stream_to(response, target: Path, url: str) -> Path:
     return destination
 
 
+@dataclass
+class HubConfig:
+    """Configuration for the ROM Hub download lane."""
+    save_path: str
+    base_url: str = ""          # carried for the status row like every client
+    #: How many plugin fetches to run per sweep. One, for the same reason the
+    #: site lane runs one: a plugin fetch is a subprocess talking to a network
+    #: the operator allowlisted, not a firehose.
+    max_active: int = 1
+
+
+class HubDownloader:
+    """ROM Hub plugins as a download client.
+
+    The lane that makes an enabled plugin part of acquisition instead of a
+    CLI curiosity: search results from the hub protocol carry a `hub://`
+    URL, `add` records the job in a ledger beside the downloads, and the
+    sweep asks the plugin for its gated FetchPlan and streams the files
+    through the Hub's own downloader. From here on the file is like any
+    other finished download: the import sweep matches it to its queue row
+    by name and runs it through DAT verification and naming.
+
+    The Hub's `import` verb uploads straight to the library server, which
+    is exactly the pipeline this lane must NOT take -- ROMarr owns import.
+    So this fetches only, into staging, and lets the normal path do the rest.
+    """
+
+    #: Jobs are labelled with the release title for the same reason the site
+    #: lane labels them: the import sweep matches a finished download to its
+    #: queue row by that title.
+    TAKES_NAME = True
+
+    LEDGER = ".romarr-hub.json"
+
+    protocol = "hub"
+    _locks: dict[str, threading.RLock] = {}
+
+    def __init__(self, config: HubConfig, fetch=None):
+        self._config = config
+        #: Injectable for tests; live use goes through hub.fetch, which owns
+        #: the PluginProcess lifecycle and the sandbox policy.
+        self._fetch = fetch
+
+        self._added = threading.local()
+        self.detail = ""
+        self.path_mappings: list | tuple = ()
+
+    @property
+    def last_job_id(self) -> str:
+        return getattr(self._added, "job_id", "")
+
+    @property
+    def name(self) -> str:
+        return "ROM Hub"
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._config.save_path)
+
+    def reachable(self) -> bool:
+        from . import hub
+        if not self.configured:
+            self.detail = "no download directory set"
+            return False
+        if not hub.available():
+            self.detail = "ROM Hub is not installed in this container"
+            return False
+        try:
+            hub._unsandboxed()
+        except RuntimeError as exc:
+            self.detail = str(exc)
+            return False
+        plugins = hub.searchable_plugins()
+        if not plugins:
+            self.detail = ("ROM Hub is installed but no enabled plugin "
+                           "declares search")
+            return False
+        try:
+            Path(self._config.save_path).mkdir(parents=True, exist_ok=True)
+        except OSError as err:
+            self.detail = f"download directory is not writable: {err.strerror}"
+            return False
+        self.detail = f"{len(plugins)} searchable plugin(s): " \
+                      + ", ".join(plugins)
+        return True
+
+    # -- the ledger (same shape as the site lane's) --------------------------
+
+    def _ledger_path(self) -> Path:
+        return Path(self._config.save_path) / self.LEDGER
+
+    @contextmanager
+    def _transaction(self, kind="ledger"):
+        """Coordinate client reloads and processes sharing a staging path."""
+        path = self._ledger_path().resolve().with_suffix(f".{kind}.lock")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock = self._locks.setdefault(str(path), threading.RLock())
+        with lock, path.open("a") as stream:
+            try:
+                import fcntl
+            except ImportError:  # Windows still has the shared thread lock.
+                fcntl = None
+            if fcntl is not None:
+                fcntl.flock(stream, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(stream, fcntl.LOCK_UN)
+
+    def _read(self) -> list[dict]:
+        try:
+            rows = json.loads(self._ledger_path().read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return []
+        if not isinstance(rows, list):
+            raise ValueError("invalid Hub queue ledger")
+        if any(not isinstance(r, dict) for r in rows):
+            raise ValueError("invalid Hub queue row")
+        return rows
+
+    def _write(self, rows: list[dict]) -> None:
+        import tempfile
+        path = self._ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             dir=path.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(rows, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def add(self, url: str, *, save_path: str | None = None,
+            name: str = "") -> bool:
+        self._added.job_id = ""
+        if not self.configured:
+            return False
+        try:
+            with self._transaction():
+                return self._add(url, save_path=save_path, name=name)
+        except (OSError, ValueError):
+            log.warning("could not persist the Hub download queue")
+            return False
+
+    def _add(self, url: str, *, save_path: str | None = None,
+            name: str = "") -> bool:
+        """Record a hub job. The plugin fetch happens in the next sweep."""
+        if not self.configured:
+            return False
+        if not str(url or "").startswith("hub://"):
+            log.warning("hub downloader was handed a %s link, not a hub:// one",
+                        str(url).split(":", 1)[0] or "blank")
+            return False
+        from . import hub
+        try:
+            hub.decode_result(url)
+        except ValueError as err:
+            log.warning("refusing an undecodable hub release: %s", err)
+            return False
+        rows = self._read()
+        job_id = "hub:" + hashlib.sha256(url.encode()).hexdigest()
+        for row in rows:
+            if row.get("url") != url:
+                continue
+            if row.get("state") == "pending" or (
+                    row.get("state") == "done" and row.get("file") and Path(row["file"]).exists()):
+                self._added.job_id = row.get("id", job_id)
+                return True
+        # Retry replaces failed/missing attempts. Historical failures must not
+        # poison a new request which shares the same stable download identity.
+        rows = [row for row in rows if row.get("url") != url]
+        rows.append({
+            "id": job_id, "url": url, "name": name,
+            "save_path": save_path or self._config.save_path,
+            "state": "pending", "detail": "", "file": "",
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        })
+        self._write(rows)
+        self._added.job_id = job_id
+        return True
+
+    def completed(self) -> list[dict]:
+        """Fetch pending jobs without holding the ledger lock over network I/O."""
+        if not self.configured:
+            return []
+        with self._transaction("fetch"):
+            with self._transaction():
+                pending = [dict(row) for row in self._read()
+                           if row.get("state") == "pending"][:max(1, self._config.max_active)]
+            for row in pending:
+                self._run(row)
+                with self._transaction():
+                    rows = self._read()
+                    for current in rows:
+                        if current.get("id") == row.get("id") and current.get("state") == "pending":
+                            current.update(row)
+                    self._write(rows)
+        with self._transaction():
+            rows = self._read()
+        out = []
+        for row in rows:
+            if row.get("state") != "done" or not row.get("file"):
+                continue
+            path = Path(row["file"])
+            if not path.exists():
+                continue
+            out.append({
+                "id": row.get("id", ""),
+                "name": row.get("name") or path.name,
+                "content_path": str(path),
+                "save_path": str(path.parent),
+                "state": "done",
+            })
+        return out
+
+    def _run(self, row: dict) -> None:
+        """Fetch one hub job through its plugin, recording why if it failed."""
+        from . import hub
+        try:
+            result = hub.decode_result(row.get("url", ""))
+        except ValueError as err:
+            row.update(state="failed", detail=str(err))
+            return
+        root = Path(row.get("save_path") or self._config.save_path).resolve()
+        target = root / hashlib.sha256(row["url"].encode()).hexdigest()
+        if not target.resolve().is_relative_to(root):
+            row.update(state="failed", detail="staging directory escapes download root")
+            return
+        try:
+            if self._fetch is not None:
+                outcome = self._fetch(result, target)
+            else:
+                outcome = hub.fetch(result, target)
+        except Exception as err:  # pragma: no cover -- hub.fetch catches
+            outcome = {"ok": False, "error": f"plugin fetch failed ({type(err).__name__})",
+                       "files": []}
+        if not outcome.get("ok") or not outcome.get("files"):
+            row.update(state="failed",
+                       detail=str(outcome.get("error") or "no files fetched"))
+            return
+        # A multi-file plan (a disc set) is reported by its directory, which
+        # is what the import sweep already understands from qBittorrent; a
+        # single file is reported by the file itself.
+        files = [Path(f).resolve() for f in outcome["files"]]
+        if any(not f.is_relative_to(target.resolve()) or not f.is_file() for f in files):
+            row.update(state="failed", detail="plugin output is outside its job or missing")
+            return
+        row.update(state="done", detail="",
+                   file=str(Path(files[0]) if len(files) == 1
+                            else target))
+
+    def failed(self) -> list[dict]:
+        """Expose failed fetches so Activity does not stay grabbed forever."""
+        with self._transaction():
+            return [{"id": row.get("id", ""), "name": row.get("name", ""),
+                     "detail": row.get("detail", "plugin fetch failed")}
+                    for row in self._read() if row.get("state") == "failed"]
+
+
 def hand_off(client, url: str, *, name: str = "") -> bool:
     """Give a client a release, telling the ones that can use it its title.
 
@@ -3016,21 +3282,37 @@ def hand_off_with_id(client, url: str, *, name: str = "") -> tuple[bool, str]:
     return ok, (getattr(client, "last_job_id", "") or "") if ok else ""
 
 
-def match_queue_item(queue, download: dict):
-    """Find the queue row for a completed download by identity, then title."""
-    found = str(download.get("hash") or "").strip().lower()
+def matching_queue_items(queue, download: dict, *, client_id: str = "") -> list:
+    """Match within a client, refusing conflicting comparable identities.
+
+    All active requests for one transfer must be completed by one import.
+    Legacy rows without a client ID or download ID retain the title fallback.
+    """
+    from .profiles import normalise_infohash
+    found = normalise_infohash(download.get("hash"))
     job = str(download.get("id") or "").strip()
-    if found or job:
-        for item in queue:
-            if found and str(item.release_id).lower() == f"btih:{found}":
-                return item
-            if job and item.download_id == job:
-                return item
-    name = download.get("name", "")
+    exact, fallback = [], []
     for item in queue:
-        if item.release == name:
-            return item
-    return None
+        if client_id and item.download_client_id and item.download_client_id != client_id:
+            continue
+        identity = str(item.release_id).lower()
+        row_hash = normalise_infohash(identity[5:]) if identity.startswith("btih:") else ""
+        if job and item.download_id and item.download_id != job:
+            continue
+        if found and row_hash and row_hash != found:
+            continue
+        if (found and row_hash == found) or (job and item.download_id == job):
+            exact.append(item)
+        elif download.get("name") and item.release == download["name"]:
+            fallback.append(item)
+    return sorted(exact or fallback,
+                  key=lambda item: item.state in ("imported", "import-failed", "failed"))
+
+
+def match_queue_item(queue, download: dict, *, client_id: str = ""):
+    """The first active match, for callers only needing one queue row."""
+    matches = matching_queue_items(queue, download, client_id=client_id)
+    return matches[0] if matches else None
 
 
 def pick_client(protocol: str, clients: list) -> object | None:
@@ -3437,6 +3719,17 @@ CLIENT_TYPES = {
                        "asks for longer"),
         ],
     },
+    "hub": {
+        "label": "ROM Hub",
+        "protocol": "hub",
+        "default_port": 0,
+        "fields": [
+            FIELD("name", "Name", default="ROM Hub"),
+            FIELD("enable", "Enable", "bool", True),
+            FIELD("save_path", "Save Path", default="/downloads/hub",
+                  help="Where plugin fetches land; the importer reads here"),
+        ],
+    },
     "browser": {
         "label": "Headless Browser",
         "protocol": "browser",
@@ -3596,6 +3889,9 @@ def build_client(cfg: dict):
         client = NZBGet(NzbgetConfig(
             base_url=url, username=cfg.get("username", ""),
             password=cfg.get("password", ""), category=category))
+    elif kind == "hub":
+        client = HubDownloader(HubConfig(
+            save_path=cfg.get("save_path", "")))
     elif kind in ("direct", "browser"):
         # A blank host means "launch one here", so an unset host must not be
         # assembled into `ws://localhost:3000` -- that would point the driver

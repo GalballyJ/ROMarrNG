@@ -12,6 +12,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from .collections import Policy, build_plan
 from .dat import Dat, Game, base_title
 from .platforms import PLATFORMS, Platform, resolve
 
@@ -105,7 +106,8 @@ def _entry_key(platform_slug: str, dat_name: str, group_key: str) -> str:
 
 
 def _selected_entries(
-    dats: list[Dat], preferred_regions: list[str] | tuple[str, ...] | None = None
+    dats: list[Dat], preferred_regions: list[str] | tuple[str, ...] | None = None,
+    policy: Policy | None = None,
 ) -> list[DatCatalogEntry]:
     regions = tuple(
         str(region).strip().lower()
@@ -124,7 +126,9 @@ def _selected_entries(
         platform = platform_for_dat_name(dat.name)
         if platform is None:
             continue
-        chosen = dat.one_game_one_rom(list(regions))
+        chosen = (dat.one_game_one_rom(list(regions)) if policy is None else
+                  {title.name: dat.games[title.name]
+                   for title in build_plan(dat, {}, policy).titles})
         variant_counts: dict[str, int] = {}
         for candidate in dat.games.values():
             group_key = dat.group_key(candidate.name)
@@ -161,8 +165,9 @@ def _selected_entries(
 def dat_catalog_platforms(
     dats: list[Dat],
     preferred_regions: list[str] | tuple[str, ...] | None = None,
+    policy: Policy | None = None,
 ) -> dict:
-    entries = _selected_entries(dats, preferred_regions)
+    entries = _selected_entries(dats, preferred_regions, policy)
     counts: dict[str, int] = {}
     for entry in entries:
         counts[entry.platform.slug] = counts.get(entry.platform.slug, 0) + 1
@@ -192,6 +197,7 @@ def dat_catalog_page(
     dats: list[Dat], *, limit: int = 24, offset: int = 0,
     platform_slugs: list[str] | None = None, query: str = "",
     preferred_regions: list[str] | tuple[str, ...] | None = None,
+    policy: Policy | None = None,
 ) -> tuple[list[dict], int | None]:
     if not 1 <= int(limit) <= MAX_LIMIT:
         raise ValueError("invalid catalog limit")
@@ -207,7 +213,7 @@ def dat_catalog_page(
     needle = _normalise(query)
     rows = [
         entry.as_dict()
-        for entry in _selected_entries(dats, preferred_regions)
+        for entry in _selected_entries(dats, preferred_regions, policy)
         if (not selected_slugs or entry.platform.slug in selected_slugs)
         and (not needle or needle in _normalise(entry.title))
     ]
@@ -219,14 +225,28 @@ def dat_catalog_page(
 def dat_catalog_game(
     dats: list[Dat], key: str,
     preferred_regions: list[str] | tuple[str, ...] | None = None,
+    policy: Policy | None = None,
 ) -> dict | None:
     if not isinstance(key, str) or not _VALID_KEY.fullmatch(key):
         return None
     return next(
         (
             entry.as_dict()
-            for entry in _selected_entries(dats, preferred_regions)
+            for entry in _selected_entries(dats, preferred_regions, policy)
             if entry.key == key
         ),
         None,
     )
+
+
+def catalog_policy(settings: dict) -> Policy:
+    """The same region and translation choices used by Collections."""
+    from .collections import normalise_lang
+    regions = settings.get("preferred_regions") or ("usa", "world", "europe", "japan")
+    languages = settings.get("translation_langs", ["en"])
+    if isinstance(languages, str):
+        languages = languages.split(",")
+    return Policy(regions=tuple(str(r).strip().lower() for r in regions),
+                  region_mode=settings.get("region_mode", "prefer"),
+                  translation_policy=settings.get("translation_policy", "exclude"),
+                  translation_langs=tuple(normalise_lang(str(lang)) for lang in languages))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +14,9 @@ from scripts.validation_engine.engine import (
     capture_candidate,
     create_plan,
     format_validation_progress,
+    inherited_toolchain_environment,
     inventory_files,
+    isolated_task_environment,
     parse_counts,
     release_lock,
     run_task,
@@ -91,6 +94,70 @@ def test_live_progress_summary_reports_completed_and_active_tasks() -> None:
         "[validation] sample: 1/3 selected tasks complete "
         "(1 passed, 0 failed, 1 blocked, 1 pending); running Long task (1m05s)"
     )
+
+
+def test_validation_child_environment_uses_allowlist_and_private_directories(tmp_path: Path) -> None:
+    run_root = tmp_path / "run"
+    run_root.mkdir(mode=0o700)
+    environment = isolated_task_environment(
+        {
+            "id": "fixture",
+            "kind": "test",
+            "env": {"FIXTURE_SETTING": "expected"},
+        },
+        run_root,
+        {
+            "PATH": "/toolchain/bin",
+            "HOME": "/operator/home",
+            "TMPDIR": "/operator/tmp",
+            "PYTHONPATH": "/operator/python",
+            "PIP_INDEX_URL": "https://user:secret@packages.invalid/simple",
+            "GITHUB_TOKEN": "synthetic-token",
+            "AWS_SECRET_ACCESS_KEY": "synthetic-secret",
+            "RANDOM_PRIVATE_VALUE": "synthetic-private-value",
+            "XDG_CONFIG_HOME": "/operator/config",
+        },
+    )
+    environment_root = run_root / "fixture-environment"
+    assert environment["PATH"] == "/toolchain/bin"
+    assert environment["HOME"] == str(environment_root / "home")
+    assert environment["USERPROFILE"] == environment["HOME"]
+    assert environment["TMPDIR"] == str(environment_root / "tmp")
+    assert environment["XDG_CONFIG_HOME"] == str(environment_root / "xdg-config")
+    assert environment["XDG_CACHE_HOME"] == str(environment_root / "xdg-cache")
+    assert environment["PIP_CACHE_DIR"] == str(environment_root / "pip-cache")
+    assert environment["PYTHONNOUSERSITE"] == "1"
+    assert environment["CI"] == "true"
+    assert environment["FIXTURE_SETTING"] == "expected"
+    for key in ("PYTHONPATH", "PIP_INDEX_URL", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "RANDOM_PRIVATE_VALUE"):
+        assert key not in environment
+    with pytest.raises(ValidationError, match="unapproved inherited environment variable"):
+        isolated_task_environment(
+            {"id": "fixture", "kind": "test", "pass_env": ["GITHUB_TOKEN"]},
+            run_root,
+            {"GITHUB_TOKEN": "synthetic-token"},
+        )
+    with pytest.raises(ValidationError, match="safe lowercase identifier"):
+        isolated_task_environment({"id": "../outside", "kind": "test"}, run_root, {"PATH": "/toolchain/bin"})
+    if os.name != "nt":
+        import stat
+
+        assert stat.S_IMODE((environment_root / "home").stat().st_mode) == 0o700
+
+
+def test_runtime_probe_environment_uses_the_toolchain_allowlist() -> None:
+    environment = inherited_toolchain_environment({
+        "PATH": "/toolchain/bin",
+        "PYENV_ROOT": "/toolchain/pyenv",
+        "PYTHONPATH": "/operator/python",
+        "GITHUB_TOKEN": "synthetic-token",
+        "HTTPS_PROXY": "http://proxy.invalid",
+        "RANDOM_PRIVATE_VALUE": "synthetic-private-value",
+    })
+    assert environment == {
+        "PATH": "/toolchain/bin",
+        "PYENV_ROOT": "/toolchain/pyenv",
+    }
 
 
 def test_native_task_writes_private_log_and_records_result_counts(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ INPUTS = (
     "requirements.txt",
     ".github/workflows/docker.yml",
     "release-notes/README.md",
+    "release-notes/20261012-validation-environment-isolation.md",
     "docs/development/validation-engine.md",
     "scripts/validation_engine/__init__.py",
     "scripts/validation_engine/config.py",

@@ -241,3 +241,10 @@ def test_send_test_rejects_an_unknown_type():
 def test_only_the_url_field_carries_the_provider_hint():
     assert notify.FIELD_HELP["username"] != NOTIFIERS["discord"]["help"]
     assert notify.FIELD_LABELS["url"] == "URL"
+
+
+def test_discord_supplies_the_documented_client_user_agent(sent):
+    from romarr.app import VERSION
+    Notifier([conn("discord")]).send(Message(ON_GRAB, "Test"))
+    assert sent[0]["headers"]["User-Agent"] == (
+        f"DiscordBot (https://github.com/snapetech/ROMarrNG, {VERSION})")

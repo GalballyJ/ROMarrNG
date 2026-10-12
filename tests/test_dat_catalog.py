@@ -78,3 +78,19 @@ def test_dat_catalog_rejects_bad_cursors_and_platform_slugs():
         dat_catalog_page([dat], offset=10001)
     with pytest.raises(ValueError):
         dat_catalog_page([dat], platform_slugs=["../library"])
+
+
+def test_catalog_policy_filters_strict_regions_and_selects_translation():
+    from romarr.dat_catalog import catalog_policy
+    dat = parse_dat('''<datafile><header><name>Nintendo - Super Nintendo Entertainment System</name></header>
+    <game name="Game (USA)"/><game name="Game (Japan)" cloneof="Game (USA)"/>
+    <game name="Game (Japan) [T-De]" cloneof="Game (USA)"/><game name="Other (Japan)"/>
+    </datafile>''')
+    strict = catalog_policy({"preferred_regions": ["usa"], "region_mode": "strict"})
+    rows, _ = dat_catalog_page([dat], policy=strict)
+    assert len(rows) == 1 and rows[0]["dat"]["entry"] == "Game (USA)"
+    selected = catalog_policy({"preferred_regions": ["usa"],
+                              "translation_policy": "prefer", "translation_langs": ["de"]})
+    translated, _ = dat_catalog_page([dat], query="Game", policy=selected)
+    assert translated[0]["dat"]["entry"] == "Game (Japan) [T-De]"
+    assert translated[0]["catalogId"] == rows[0]["catalogId"]

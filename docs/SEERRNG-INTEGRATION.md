@@ -71,6 +71,18 @@ fall back to the game's global first-release date.
 
 ### DAT catalog
 
+DAT browsing, platform counts, detail lookup, and acquisition use Media Management's
+saved region mode and translation language policy. Strict mode omits disallowed regions.
+The request retains its stable catalog key and display title while acquisition searches
+the selected DAT variant. If that identity is no longer selected when dispatch runs,
+the request fails rather than silently acquiring a different variant. `keep_both` remains
+a Collections operation; the SeerrNG catalog exposes one selected identity per game.
+
+Enabled Hub sources participate in these requests when a ROM Hub download client is
+configured. Multiple external request IDs sharing one transfer receive independent
+completion records and access to the same imported assets. Download IDs are scoped to
+the configured client. Partial imports remain failed and are not exposed as deliverable.
+
 When DAT files are loaded, the v2 contract exposes a preservation catalog that
 does not require IGDB credentials. It reports the ROMarrNG systems it could
 match and up to 100 unmatched DAT header names for operator review. Detection
