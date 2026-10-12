@@ -14,7 +14,6 @@ works, it was run. Where it has never been run, it says so.
 - [Docker Compose](#docker-compose) ← start here for a real install
 - [Proxmox LXC](#proxmox-lxc)
 - [Home Assistant](#home-assistant)
-- [YunoHost](#yunohost)
 - [From source](#from-source)
 - [First run: claiming the install](#first-run-claiming-the-install)
 - [The rule that catches everyone](#the-rule-that-catches-everyone)
@@ -324,24 +323,6 @@ Home Assistant's `media` share — where a RomM or Jellyfin add-on can also see
 them.
 
 ---
-
-## YunoHost
-
-ROMarrNG has a native package for YunoHost 12.1 and newer on `amd64` and
-`arm64`. Install it from the app catalog when available, or install the
-`testing` branch while the catalog submission is under review:
-
-```bash
-sudo yunohost app install https://github.com/YunoHost-Apps/romarrng_ynh/tree/testing
-```
-
-The package installs at the root of a dedicated domain, defaults access to
-YunoHost administrators, and binds ROMarrNG to localhost behind YunoHost's
-Nginx proxy. ROMarrNG's own password login remains enabled. Give the
-`romarrng` service account access to the library and completed-download
-folders. App backups include settings and plugins but exclude ROM library
-files; back those up separately. See the [YunoHost administrator guide](../packaging/yunohost/doc/ADMIN.md)
-for permissions, storage, backup, and upgrade details.
 
 ---
 

@@ -55,7 +55,7 @@ full claim-by-claim evidence file.*
 - [How it works](#how-it-works)
 - [The tour](#the-tour) — every feature, what it is for, and what it looks like
 - [Requirements](#requirements)
-- [Installation](#installation) — [Docker](#docker) · [Docker Compose](#docker-compose) · [Proxmox LXC](#proxmox-lxc) · [Home Assistant](#home-assistant) · [YunoHost](#yunohost) · [Source](#from-source)
+- [Installation](#installation) — [Docker](#docker) · [Docker Compose](#docker-compose) · [Proxmox LXC](#proxmox-lxc) · [Home Assistant](#home-assistant) · [Source](#from-source)
   - **[The full install guide](docs/INSTALL.md)** — every variable, backup, upgrade, rollback, troubleshooting
 - [Signing in](#signing-in)
 - [Configuration](#configuration)
@@ -425,29 +425,6 @@ Settings → Add-ons → Add-on Store → ⋮ → Repositories, add
 `https://github.com/snapetech/ROMarrNG`, install **ROMarr**. Options set on
 the add-on page become ROMarr's environment — see
 [homeassistant/romarr](homeassistant/romarr/README.md).
-
-### YunoHost
-
-ROMarrNG has a native YunoHost package for YunoHost 12.1 and newer on `amd64`
-and `arm64`. Install it from the app catalog when it becomes available, or
-install its `testing` branch while the catalog submission is under review:
-
-```bash
-sudo yunohost app install https://github.com/YunoHost-Apps/romarrng_ynh/tree/testing
-```
-
-The package requires a dedicated domain root and defaults access to YunoHost
-administrators. It keeps ROMarrNG's own password login enabled and binds the
-service to localhost behind YunoHost's Nginx proxy. Give the `romarrng` service
-account access to your library and download folders. The app backup includes
-settings and plugins; ROM library files are excluded and should be backed up
-separately. See [the package guide](packaging/yunohost/doc/ADMIN.md).
-
-Every push to `main` syncs `packaging/yunohost` to the package repository's
-`testing` branch. The ROMarrNG repository needs a `YUNOHOST_REPO_TOKEN` Actions
-secret with write access to `YunoHost-Apps/romarrng_ynh`. The Docker workflow
-also rebuilds and publishes `ghcr.io/snapetech/romarrng:latest` from `main`
-after its checks pass.
 
 ### From source
 
