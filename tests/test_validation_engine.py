@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ from scripts.validation_engine.engine import (
     run_task,
 )
 from scripts.validation_engine.reconcile import reconcile_receipts
+from scripts.validation_engine.trusted_sandbox import require_trusted_local_test_sandbox
 
 
 def make_git_root(root: Path, files: dict[str, str]) -> Path:
@@ -94,6 +96,36 @@ def test_live_progress_summary_reports_completed_and_active_tasks() -> None:
         "[validation] sample: 1/3 selected tasks complete "
         "(1 passed, 0 failed, 1 blocked, 1 pending); running Long task (1m05s)"
     )
+
+
+def test_local_test_execution_requires_matching_outer_sandbox_marker(tmp_path: Path) -> None:
+    marker = tmp_path / "marker"
+    token = "a" * 64
+    with pytest.raises(RuntimeError, match="trusted bubblewrap launcher"):
+        require_trusted_local_test_sandbox({}, marker)
+    marker.write_text("b" * 64, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="trusted bubblewrap launcher"):
+        require_trusted_local_test_sandbox({"VALIDATION_OUTER_SANDBOX_TOKEN": token}, marker)
+    marker.write_text(token, encoding="utf-8")
+    require_trusted_local_test_sandbox({"VALIDATION_OUTER_SANDBOX_TOKEN": token}, marker)
+    require_trusted_local_test_sandbox({"GITHUB_ACTIONS": "true"}, marker)
+
+
+def test_trusted_launcher_host_resource_canary() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is unavailable for the trusted-launcher canary")
+    root = Path(__file__).resolve().parents[1]
+    canary = root / "scripts/validation_engine/trusted-test-launcher.contract.mjs"
+    result = subprocess.run(
+        [node, "--test", str(canary)],
+        cwd=root,
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_validation_child_environment_uses_allowlist_and_private_directories(tmp_path: Path) -> None:

@@ -12,6 +12,18 @@ python3.13 -m scripts.validation_engine.engine --tests-only
 python3.13 -m scripts.validation_engine.engine
 ```
 
+Local execution of test tasks requires the trusted Linux bubblewrap launcher.
+When evaluating an unreviewed branch, copy `trusted-test-launcher.mjs` from a
+reviewed revision to a location outside the checkout and run:
+
+```sh
+node /path/to/trusted-test-launcher.mjs "$PWD" -- python3.13 -m scripts.validation_engine.engine --tests-only
+```
+
+Run planning for an unreviewed candidate through that launcher too, because
+planning imports its validation configuration. GitHub Actions remains
+responsible for hosted validation.
+
 `--plan` discovers files and required commands without installing packages or
 running pytest. An execution creates a disposable Python 3.13 virtual
 environment under its private temporary directory, installs the repository

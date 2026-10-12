@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from . import config
+from .trusted_sandbox import require_trusted_local_test_sandbox
 
 ENGINE_VERSION = 1
 ROOT = Path(__file__).resolve().parents[2]
@@ -645,6 +646,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.plan:
         print(json.dumps(plan, indent=2) if args.json else f"{config.REPOSITORY}: {len(plan['inventory'])} test files; {sum(item['selected'] for item in plan['tasks'])} tasks selected; {sum(item['available'] for item in plan['prerequisites'])}/{len(plan['prerequisites'])} commands available")
         return 0
+    if any(task['selected'] and task['kind'] == 'test' for task in plan['tasks']):
+        require_trusted_local_test_sandbox()
     lock = acquire_lock(ROOT)
     try:
         receipt, run_root, exit_code = execute(
