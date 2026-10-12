@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.4] - 2026-10-12
+
+### User-facing changes
+
+#### Changed
+
+- **Images:** Published container images now use the updated SBOM toolchain for their SPDX inventories, keeping component records current for downstream review.
+
 ## [0.14.3] - 2026-10-12
 
 ### User-facing changes
