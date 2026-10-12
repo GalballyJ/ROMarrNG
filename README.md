@@ -14,6 +14,17 @@ Move Weight
 
 ROMarr runs perfectly well on its own — nothing above it is required.
 
+ROMarrNG is the Snapetech-maintained fork of
+[BlizzHacker/romarr](https://github.com/BlizzHacker/romarr). We keep it because
+SeerrNG needs a versioned game catalog and request lifecycle with scoped file
+delivery; upstream's generic external-request API does not currently provide
+that full contract. ROMarrNG also maintains the DAT catalog and game-asset
+delivery used by the integrated flow, alongside its own releases and packages.
+Most of ROMarr's standalone application remains shared with upstream. The
+[upstream comparison](docs/UPSTREAM-PARITY.md) records the exact baseline,
+what ROMarrNG adds both standalone and with SeerrNG, and what would let us
+switch back.
+
 Support ROMarrNG on [Ko-fi](https://ko-fi.com/snapetech).
 
 On Unraid, the [ROMarrNG fork template](packaging/unraid/romarrng.xml) installs
@@ -65,6 +76,7 @@ full claim-by-claim evidence file.*
 - [Troubleshooting](#troubleshooting)
 - [Release history](CHANGELOG.md)
 - [Cartridge ecosystem](#cartridge-ecosystem)
+- [Why ROMarrNG is maintained](docs/UPSTREAM-PARITY.md)
 
 ---
 
