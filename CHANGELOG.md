@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.3] - 2026-10-12
+
+### User-facing changes
+
+#### Added
+
+- **Library:** Request status now reports whether a finished file has been placed in a RomM library folder, so SeerrNG can show an In RomM Library badge once the file is in place.
+
+#### Changed
+
+- **Distribution:** Manually dispatched ROMarrNG browser image builds now receive commit-specific tags on non-default branches, so candidate browser images can be tested without changing the default browser tag.
+- **Documentation:** ROMarrNG’s install and SeerrNG guides now explain the current DAT catalog, sandbox requirements, TLS options, YunoHost package, and image tags.
+- **Ci Validation:** Adds source-bound pytest receipts and verifies the current test result before building a ROMarrNG container image.
+
 ## [0.14.2] - 2026-10-07
 
 ### User-facing changes
