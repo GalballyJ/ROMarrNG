@@ -33,6 +33,13 @@ untracked files, the discovered `tests/test_*.py` file hashes, and the test
 workflow, pytest configuration, and requirements input digests. A change during
 execution blocks the result. No result cache is reused.
 
+Runtime probes and child commands receive only an inherited allowlist for
+executable paths, platform process variables, locale, and timezone, plus child
+tasks' declared settings. Each task uses run-owned home, temporary, XDG, and pip
+cache directories, and Python user-site packages are disabled. Test children receive
+`CI=true`; ambient credentials, Python path injection, proxy settings, and
+user configuration paths are not inherited.
+
 The CI job exports a short-lived receipt from the Linux x64 pytest runner. The
 image job checks its run ID, attempt, commit, runner identity, case count, and
 inventory digest against the image job's own checkout before building an image.
