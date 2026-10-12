@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.14.7] - 2026-10-12
+
+### User-facing changes
+
+#### Added
+
+- **Acquisition:** Collections adds strict regions, selected translation languages, and Switch TitleDB sets. Hub sources can search and stage downloads for normal import. Dashboard scripts work again, renamed downloads retain request identity, and Discord sends its required client identifier.
+  - **Action required:** Add a ROM Hub download client to enable plugin acquisition.
+
+#### Changed
+
+- **Integrations:** The new upstream comparison distinguishes ROMarr's shared request API from ROMarrNG's SeerrNG contract, standalone additions, and replacement conditions.
+- **Documentation:** The upstream backlog guide now links each audited issue and pull request to the implementation, its tests, and the remaining checks that need a reporter's environment.
+
+#### Fixed
+
+- **Integration:** DAT-backed SeerrNG requests now match common region aliases, retries keep their active status, and Hub fetch failures close the request. Switch catalog loading works without DATs, translation rules also apply when 1G1R is off, and Hub platform data improves release scoring. Platform-specific Hub searches skip results without a verified platform.
+- **Integration:** SeerrNG DAT browsing and requests now honor saved region and translation policies. Requests sharing a download each receive completion status and deliverable assets. Both image editions test sandboxed Hub acquisition and SeerrNG delivery before publication.
+
+#### Security
+
+- **Plugins:** ROM Hub plugins now have bounded temporary storage and cannot change file permissions, spawn child processes, or use io_uring to bypass socket restrictions. The trusted SDK runner loads before plugin paths become importable. Plugin file access stays within installed code, approved assets, and required runtime files, reducing the impact of a misbehaving source.
+- **Validation:** Local test runs now require a trusted Linux sandbox that hides operator files, ambient secrets, service sockets, and network access from candidate test code. Dependency roots that resolve outside the candidate tree are rejected before they can be mounted into the sandbox.
+  - **Action required:** run local tests through trusted launcher
+- **Validation:** Validation task and runtime-probe processes now use restricted environment variables and private temporary settings, reducing exposure of unrelated credentials and configuration during validation.
+- **Validation:** Dependency installation is limited to hosted CI and receives only explicitly approved proxy, private-index, and custom CA settings; local offline tests use a preconfigured Python environment. Hosted checkouts no longer persist their token into `.git/config`, and Linux task children cannot read the validation runner's environment through procfs.
+
 ## [0.14.6] - 2026-10-12
 
 ### User-facing changes
