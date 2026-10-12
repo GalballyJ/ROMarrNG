@@ -63,6 +63,7 @@ full claim-by-claim evidence file.*
 - [Plugins](#plugins)
 - [Multiple libraries](#multiple-libraries)
 - [Troubleshooting](#troubleshooting)
+- [Release history](CHANGELOG.md)
 - [Cartridge ecosystem](#cartridge-ecosystem)
 
 ---
@@ -289,28 +290,41 @@ verification, and library import. The maintained container is
 | `GET` | `/api/v1/integration/catalog/popular-page` | Browse popular IGDB titles with the same filters. |
 | `GET` | `/api/v1/integration/catalog/platforms` | List IGDB platform IDs and names. |
 | `GET` | `/api/v1/integration/catalog/games/{igdbId}` | Read one game's IGDB catalog details. |
-| `POST` | `/api/v1/integration/requests` | Idempotently create a request using `externalRequestId`, `game`, `platform`, and optional IGDB identity. |
+| `GET` | `/api/integration/seerrng/v1/catalog/dat/platforms` | List DAT-backed systems and unmatched DAT names. |
+| `GET` | `/api/integration/seerrng/v1/catalog/dat/search-page` | Search loaded DAT titles by name and optional system. |
+| `GET` | `/api/integration/seerrng/v1/catalog/dat/browse-page` | Browse loaded DAT titles alphabetically. |
+| `GET` | `/api/integration/seerrng/v1/catalog/dat/games/{catalogKey}` | Read one DAT title by its stable catalog key. |
+| `POST` | `/api/v1/integration/requests` | Idempotently create a request using `externalRequestId`, `game`, `platform`, and optional IGDB or DAT identity. |
 | `GET` | `/api/v1/integration/requests/{externalRequestId}` | Read provider status, catalog identity, deliverability, and retry/cancel actions. |
 | `POST` | `/api/v1/integration/requests/{externalRequestId}/retry` | Retry failed acquisition. After an interrupted handoff, require `confirmNoExistingDownload: true` after checking the download client's queue and history. |
 | `POST` | `/api/v1/integration/requests/{externalRequestId}/cancel` | Cancel while the request is searching and before a transfer is handed to a download client. After an interrupted handoff, provide `confirmNoExistingDownload: true` only after checking the download client's queue and history. |
 | `GET` | `/api/v1/integration/requests/{externalRequestId}/assets` | List request-scoped files found under a configured local library root. |
 | `GET` | `/api/v1/integration/requests/{externalRequestId}/assets/{assetId}` | Stream a local asset, including HTTP byte ranges. |
 
-The same contract is available under the versioned SeerrNG prefix
-`/api/integration/seerrng/v1`. Its `ping` response advertises contract and
-capability versions, including whether ROMarrNG has IGDB configured. The
-`catalog/platforms`, `catalog/search`, `catalog/search-page`, `catalog/popular`,
-`catalog/popular-page`, and `catalog/games/{igdbId}` routes expose ROMarrNG's
-IGDB catalog with stable
-numeric game and platform IDs. SeerrNG can use this catalog for emulation
-requests while ROMarrNG continues to acquire the ROM; PC game requests remain
-on QuestarrNG. A request carries `{catalogProvider: "igdb", catalogId,
-platformId}` as its `identity`, and its status response reports `retry` and
-`cancel` actions that reflect ROMarrNG's current state.
+The versioned SeerrNG prefix is `/api/integration/seerrng/v1`; the legacy
+`/api/v1/integration` routes remain available. The handshake advertises
+contract and capability versions. IGDB catalog routes expose stable numeric
+game and platform IDs when IGDB is configured. SeerrNG can use this catalog for
+emulation requests while ROMarrNG continues to acquire the ROM; PC game
+requests remain on QuestarrNG. When IGDB is not configured,
+`capabilities.catalog` is false and IGDB catalog routes return `503`.
 
-When IGDB is not configured in ROMarrNG, the handshake reports
-`capabilities.catalog: false` and catalog routes return `503`. Set the IGDB
-provider in ROMarrNG's metadata providers to enable it.
+ROMarrNG also exposes a preservation catalog from its loaded No-Intro and
+Redump DATs, without IGDB credentials. Set `DAT_PATH` to a directory of DAT
+files to enable it. SeerrNG can browse and search entries grouped by matched
+ROMarrNG system; the platforms route also reports up to 100 unmatched DAT
+header names for review. This is advertised separately as
+`capabilities.datCatalog`, so the DAT catalog remains available when IGDB is
+not configured. DAT entries do not include IGDB artwork or metadata.
+
+Catalog-backed requests retain their identity. An IGDB request uses
+`{catalogProvider: "igdb", catalogId, platformId}` in `identity`; a DAT request
+uses `{catalogProvider: "dat", catalogKey, platformSlug}`. DAT keys are stable
+across DAT version refreshes, and ROMarrNG checks that the title, system, and
+key still refer to the same loaded entry. The status response reports `retry`
+and `cancel` actions that reflect ROMarrNG's current state. See the full
+[SeerrNG integration contract](docs/SEERRNG-INTEGRATION.md) for response
+fields, limits, and retry behavior.
 
 Prowlarr diagnostics are available from the Indexers page and
 `POST /api/v1/indexer/diagnose`. They report the management API separately
@@ -321,9 +335,11 @@ are not included in the diagnostic response.
 Request IDs are durable and repeated creation is safe. ROMarr can stop a
 request before downloader handoff; after handoff, stop the transfer in ROMarr
 or the download client. The status API returns `409` when a transfer is active
-or the title is already available. Asset responses contain opaque IDs, names,
-and sizes, never server filesystem paths. Remote libraries may report a title
-as available without exposing a downloadable local file.
+or the title is already available. A multi-file request stays failed and its
+assets stay unavailable until the complete import succeeds. Asset responses
+contain opaque IDs, names, and sizes, never server filesystem paths. Remote
+libraries may report a title as available without exposing a downloadable
+local file.
 
 ---
 
@@ -544,12 +560,15 @@ request actually came through it.
 | `MOONLIGHT_HOST` | no | A Wolf, Sunshine or Steam Headless machine, e.g. `192.168.0.50`. Probed with the unauthenticated `/serverinfo`; reported on the status page |
 | `MOONLIGHT_KIND` | no | `wolf` (default), `sunshine` or `steam-headless`. Not sniffed — `/serverinfo` cannot tell them apart |
 | `MOONLIGHT_USER` / `MOONLIGHT_PASS` | no | Sunshine/Steam Headless admin credentials, so ROMarr can read the app list and relay a pairing PIN. Never written to the state file |
+| `MOONLIGHT_TLS_CA_FILE` / `MOONLIGHT_TLS_FINGERPRINT` | no | Trust a Sunshine certificate authority or pin its SHA-256 certificate fingerprint before sending admin credentials |
+| `MOONLIGHT_ALLOW_INSECURE_TLS` | no | Explicitly allow untrusted Sunshine TLS; use only on a trusted LAN |
 | `WOLF_SOCKET_PATH` / `WOLF_API_URL` | no | Wolf's API is a UNIX socket. Give ROMarr a mounted `wolf.sock`, or the URL of the nginx proxy Wolf's own docs describe |
 | `STEAM_HEADLESS_URL` | no | The container's noVNC/neko desktop, surfaced as a link |
 | `ROMARR_PLAYERS` | no | Which browser players to offer, best first: `emulatorjs,ruffle,jsdos,emularity`. All four when unset; `none` turns every browser route off |
 | `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | no | Where your own js-dos and Emularity live. Without one, ROMarr reports that the player *would* run a file and names the setting that would let it link there |
 | `ROMARR_DATA` | no | Path to the state file |
 | `ROMARR_HOST` | no | Address to listen on (default `0.0.0.0`); use `127.0.0.1` only when the proxy shares the host network namespace |
+| `ROMARR_ALLOW_UNSANDBOXED_PLUGINS` | no | Explicitly allow ROM Hub plugins to run when seccomp is unavailable; keep unset to require sandboxing |
 | `DAT_PATH` | no | Directory of No-Intro / Redump DATs. Loose `.dat`/`.xml` files **and** the ZIP archives No-Intro distributes are read, including one level down beside the platform they describe. Point it at a DAT directory, not at your ROM library |
 | `COMPRESSATORIUM_URL` | no | A [Compressatorium](https://github.com/pacnpal/compressatorium) service, for the Decompress task: batch decompress a compressed library, verify every output against the DATs, and delete only the originals that verified. The library must be mounted into both containers at the same path |
 | `COMPRESSATORIUM_API_KEY` | no | Bearer token, when Compressatorium has `COMPRESSATORIUM_ENABLE_AUTH=true` |
@@ -826,7 +845,10 @@ pip install "rom-hub @ git+https://github.com/BlizzHacker/rom-hub@master"
 
 Plugins requiring an API key (e.g. RetroAchievements) are marked in the UI.
 
-Plugins are third-party and sandboxed by the host — install only ones you trust.
+Plugins are third-party and run with seccomp isolation when it is available.
+If the sandbox cannot be enabled, ROMarr disables plugin operations unless
+`ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1` explicitly opts out. Install only plugins
+you trust.
 
 **API:** `GET /api/v1/hub/plugins`, `POST /api/v1/hub/plugin` (`install`, `enable`,
 `disable`, `uninstall`).
@@ -974,6 +996,20 @@ both the reported path and the resolved path.
 ## Security
 
 - Prowlarr API keys are never returned to a browser or written to a log.
+- Give SeerrNG the dedicated integration key from *Settings → General*.
+  Integration calls are limited to 64 KiB request bodies, 120 requests per
+  minute per client address, and four concurrent acquisitions; see the
+  [integration contract](docs/SEERRNG-INTEGRATION.md).
+- ROM Hub plugin operations require seccomp. They are unavailable when the
+  sandbox cannot be enabled unless `ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1`
+  explicitly opts out.
+- The supplied Docker Compose file uses a read-only root filesystem, drops all
+  capabilities except the three needed by its entrypoint, and enables
+  `no-new-privileges`; `/tmp` remains a bounded temporary filesystem.
+- Sunshine admin credentials are sent only after certificate validation with
+  a trusted CA or fingerprint. `MOONLIGHT_ALLOW_INSECURE_TLS=1` is an explicit
+  opt-in for trusted LANs.
+- Published container images include signed build provenance and SPDX software bills of materials.
 - Archive entries resolving outside the library root are dropped (zip-slip).
 - Existing ROMs are never silently overwritten.
 - Use a dedicated library account, not an administrator one.
