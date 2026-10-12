@@ -99,8 +99,26 @@ def test_the_library_serves_organised_pages_not_the_first_100(tmp_path):
     assert len(beyond["items"]) == 15, "pagination reaches past any one page"
 
 
-def test_a_failing_list_records_why_on_the_list_itself(tmp_path):
+def test_a_failing_list_records_why_on_the_list_itself(tmp_path, monkeypatch):
     from romarr.app import ROMarr
+
+    # Keep this test offline and deterministic. The real PSN connector sends
+    # the expired NPSSO to Sony; an offline failure is a generic connection
+    # error and cannot assert the operator guidance returned for an expired
+    # token.
+    from romarr.lists import fetch_entries as real_fetch_entries
+
+    class ExpiredPsn:
+        def get(self, url, **kwargs):
+            class Response:
+                headers = {"Location": "com.scee://redirect?error=invalid_token"}
+
+            return Response()
+
+    monkeypatch.setattr(
+        "romarr.lists.fetch_entries",
+        lambda config: real_fetch_entries(config, session=ExpiredPsn()),
+    )
     svc = ROMarr(env={"ROMARR_DATA": str(tmp_path / "s.json")})
     svc.store.put_item("import_lists", {
         "name": "dead", "type": "psn", "npsso": "EXPIRED"})
