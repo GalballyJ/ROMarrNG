@@ -132,6 +132,9 @@ class QueueItem:
     # Exact imported destinations for this request, persisted across restarts.
     # Release filenames and console title IDs need not equal the catalog title.
     imported_paths: list[str] = field(default_factory=list)
+    # Download client's id, when available, captured at handoff. History names
+    # often differ from the indexer's release title; old rows fall back to name.
+    download_id: str = ""
 
 
 @dataclass

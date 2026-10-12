@@ -62,7 +62,7 @@ from .decompress import run_batch as run_decompress_batch, scan_compressed
 from .titled import TitleDBIndex, build_index as build_titled_index, validate_switch_rom
 from .downloaders import (
     CLIENT_TYPES, NZBGet, NzbgetConfig, SABnzbd, SabConfig, build_client,
-    hand_off, merge_secrets, pick_client, redact,
+    hand_off_with_id, match_queue_item, merge_secrets, pick_client, redact,
 )
 from .indexers import INDEXER_TYPES, build_indexer, redact_indexer
 from .indexers import Prowlarr, ProwlarrConfig
@@ -1987,7 +1987,8 @@ class ROMarr:
         if external_request_id and not self.store.mark_seerr_dispatching(
                 external_request_id):
             return {"ok": False, "cancelled": True}
-        ok = hand_off(client, pick.download_url, name=pick.title)
+        ok, download_id = hand_off_with_id(client, pick.download_url,
+                                           name=pick.title)
         item = QueueItem(game, platform_slug, pick.title, pick.seeders,
                          "grabbed" if ok else "failed",
                          "" if ok else f"{client.name} rejected the release",
@@ -1995,7 +1996,8 @@ class ROMarr:
                          indexer=getattr(pick, "indexer", ""),
                          size=getattr(pick, "size", 0),
                          release_fault=not ok,
-                         external_request_id=external_request_id)
+                         external_request_id=external_request_id,
+                         download_id=download_id)
         self.store.enqueue(item)
         if external_request_id:
             self.store.update_seerr_request(
@@ -4785,14 +4787,11 @@ class ROMarr:
             platform = None
             queue_item = None
             with self._lock:
-                for item in self.queue:
-                    if item.release == name:
-                        if item.state in ("imported", "import-failed"):
-                            queue_item = item
-                            break
-                        platform = resolve(item.platform)
-                        queue_item = item
-                        break
+                match = match_queue_item(self.queue, torrent)
+                if match is not None:
+                    queue_item = match
+                    if match.state not in ("imported", "import-failed"):
+                        platform = resolve(match.platform)
             if queue_item is not None and queue_item.state in ("imported", "import-failed"):
                 continue
             if platform is None:

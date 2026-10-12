@@ -8,9 +8,12 @@ or an API response.
 
 from __future__ import annotations
 
+import base64
 import datetime
+import json
 import logging
 import sys
+import time
 from dataclasses import dataclass
 
 import requests
@@ -333,8 +336,33 @@ class Romm:
         #: per process rather than a broken rescan.
         self._scan_task = "scan"
         self._token = config.api_token or ""
+        # Configured API tokens are operator-owned. Only replace tokens this
+        # client acquired with the password grant.
+        self._token_from_login = False
+
+    REFRESH_MARGIN = 60
+
+    @staticmethod
+    def _jwt_expiry(token: str) -> float | None:
+        """Read a JWT exp only to decide when to refresh; never trust it."""
+        try:
+            payload = token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            exp = json.loads(base64.urlsafe_b64decode(payload)).get("exp")
+            return float(exp) if isinstance(exp, (int, float)) else None
+        except (IndexError, ValueError, TypeError, AttributeError, UnicodeError):
+            return None
 
     def token(self) -> str | None:
+        if self._token and self._token_from_login:
+            expiry = self._jwt_expiry(self._token)
+            if expiry is not None and expiry - time.time() < self.REFRESH_MARGIN:
+                stale, self._token = self._token, ""
+                if self.token():
+                    return self._token
+                self._token = stale
+                self._token_from_login = True
+                return stale
         if self._token:
             return self._token
         if not (self._config.username and self._config.password):
@@ -365,7 +393,31 @@ class Romm:
                         getattr(response, "status_code", "no response"))
             return None
         self._token = response.json().get("access_token", "")
+        self._token_from_login = bool(self._token)
         return self._token or None
+
+    def _token_refused_with_500(self) -> bool:
+        """Recognize RomM 5.3.1's expired-token 500 without masking outages.
+
+        That version returns a bare 500 for an invalid bearer token, including
+        on /api/heartbeat. Retry only when the unauthenticated heartbeat is
+        healthy and the same heartbeat with our password-grant token returns
+        500. Fixed operator-provided tokens are never replaced.
+        """
+        if not (self._token and self._token_from_login
+                and self._config.username and self._config.password):
+            return False
+        url = f"{self._config.base_url.rstrip('/')}/api/heartbeat"
+        try:
+            bare = self._session.get(url, timeout=self.HEALTH_TIMEOUT)
+            if not bare.ok:
+                return False
+            with_token = self._session.get(
+                url, headers={"Authorization": f"Bearer {self._token}"},
+                timeout=self.HEALTH_TIMEOUT)
+        except requests.RequestException:
+            return False
+        return with_token.status_code == 500
 
     def _headers(self) -> dict[str, str]:
         token = self.token()
@@ -381,13 +433,14 @@ class Romm:
         restart appeared to fix it, which made it look like a slow leak rather
         than an expired credential.
 
-        Only 401 is retried. A 403 is a permissions problem that another token
-        will not solve, and retrying it would just double the load while
-        producing the same answer.
+        A 401 is retried, as is a RomM 5.3.1 500 only when a healthy bare
+        heartbeat shows that the password-grant token itself is refused. A 403
+        remains a permissions problem, not an authentication retry.
         """
         response = self._session.get(url, params=params, headers=self._headers(),
                                      timeout=timeout)
-        if response.status_code == 401:
+        if response.status_code == 401 or (
+                response.status_code == 500 and self._token_refused_with_500()):
             log.info("romm token rejected; re-authenticating")
             self._token = ""
             response = self._session.get(url, params=params,

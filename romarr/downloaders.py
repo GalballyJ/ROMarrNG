@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -69,6 +70,12 @@ class SABnzbd:
     def __init__(self, config: SabConfig, session: requests.Session | None = None):
         self._config = config
         self._session = session or requests.Session()
+        self._added = threading.local()
+
+    @property
+    def last_job_id(self) -> str:
+        """The SABnzbd history id returned by the last add on this thread."""
+        return getattr(self._added, "job_id", "")
 
     @property
     def configured(self) -> bool:
@@ -97,6 +104,7 @@ class SABnzbd:
 
     def add(self, url: str, *, name: str = "") -> bool:
         """Hand SABnzbd an NZB URL to fetch and queue."""
+        self._added.job_id = ""
         if not self.configured:
             return False
         params = {"name": url, "cat": self._config.category}
@@ -106,6 +114,8 @@ class SABnzbd:
         if not out or not out.get("status"):
             log.warning("sabnzbd rejected the nzb")
             return False
+        ids = out.get("nzo_ids") or []
+        self._added.job_id = str(ids[0]) if ids else ""
         return True
 
     def completed(self) -> list[dict]:
@@ -120,6 +130,7 @@ class SABnzbd:
                 "content_path": s.get("storage") or "",
                 "save_path": s.get("storage") or "",
                 "state": s.get("status", ""),
+                "id": s.get("nzo_id", ""),
             }
             for s in slots
             if str(s.get("status", "")).lower() == "completed"
@@ -1599,8 +1610,8 @@ class DebridClient:
 
     # -- the client interface -----------------------------------------------
 
-    def _finished(self) -> list[tuple[str, list]]:
-        """`(name, links)` for every one of our items the cloud has finished.
+    def _finished(self) -> list[tuple]:
+        """`(name, links[, infohash])` for each finished item we own.
 
         A "link" is whatever this service needs to produce a URL later -- a
         string, or a tuple its own `_resolve` understands.
@@ -1623,12 +1634,16 @@ class DebridClient:
         if not self.configured:
             return []
         out = []
-        for name, links in self._finished():
+        for entry in self._finished():
+            name, links, *rest = entry
             target = Path(self._config.save_path) / name
             if self._fetch_links(links, target):
-                out.append({"name": name, "content_path": str(target),
-                            "save_path": self._config.save_path,
-                            "state": self.DONE_STATE})
+                row = {"name": name, "content_path": str(target),
+                       "save_path": self._config.save_path,
+                       "state": self.DONE_STATE}
+                if rest and rest[0]:
+                    row["hash"] = str(rest[0])
+                out.append(row)
         return out
 
     def _fetch_links(self, links: list, target) -> bool:
@@ -1721,7 +1736,7 @@ class RealDebrid(DebridClient):
         self._remember(str(torrent_id))
         return True
 
-    def _finished(self) -> list[tuple[str, list]]:
+    def _finished(self) -> list[tuple]:
         out = []
         for entry in self._ours():
             torrent_id = self._entry_id(entry)
@@ -1729,7 +1744,7 @@ class RealDebrid(DebridClient):
             if not info or info.get("status") != "downloaded":
                 continue
             out.append((info.get("filename") or torrent_id,
-                        info.get("links") or []))
+                        info.get("links") or [], info.get("hash") or ""))
         return out
 
     def _resolve(self, link) -> tuple[str, str]:
@@ -2985,15 +3000,37 @@ def _stream_to(response, target: Path, url: str) -> Path:
 def hand_off(client, url: str, *, name: str = "") -> bool:
     """Give a client a release, telling the ones that can use it its title.
 
-    The importer matches a finished download to its queue row by the release
-    title, so a client that can label a job with it produces imports and one
-    that cannot produces downloads nobody claims. Only some can, and handing
-    the keyword to the rest is a TypeError -- hence the declaration on the
-    class rather than a signature check here.
+    The title remains a fallback for clients that cannot report a stable job
+    id or infohash. Only some clients accept the title, and handing the keyword
+    to the rest is a TypeError -- hence the declaration on the class rather
+    than a signature check here.
     """
     if name and getattr(client, "TAKES_NAME", False):
         return client.add(url, name=name)
     return client.add(url)
+
+
+def hand_off_with_id(client, url: str, *, name: str = "") -> tuple[bool, str]:
+    """Hand off a release and return its download-client id when available."""
+    ok = hand_off(client, url, name=name)
+    return ok, (getattr(client, "last_job_id", "") or "") if ok else ""
+
+
+def match_queue_item(queue, download: dict):
+    """Find the queue row for a completed download by identity, then title."""
+    found = str(download.get("hash") or "").strip().lower()
+    job = str(download.get("id") or "").strip()
+    if found or job:
+        for item in queue:
+            if found and str(item.release_id).lower() == f"btih:{found}":
+                return item
+            if job and item.download_id == job:
+                return item
+    name = download.get("name", "")
+    for item in queue:
+        if item.release == name:
+            return item
+    return None
 
 
 def pick_client(protocol: str, clients: list) -> object | None:
