@@ -4,6 +4,9 @@ ROMarrNG is a separate acquisition service with an authenticated API for
 SeerrNG. SeerrNG owns catalog discovery, approval, and the user-facing request
 workflow; ROMarrNG searches configured sources, hands releases to a download
 client, imports files, and reports request status.
+This guide is the route and payload reference. The
+[upstream implementation report](UPSTREAM_IMPLEMENTATION_REPORT.md) explains
+which fork changes feed this contract and links their verification evidence.
 
 Use the generated **SeerrNG provider key** from ROMarrNG's Settings → General
 page in SeerrNG's provider settings. It accepts `X-Api-Key` or
@@ -196,3 +199,18 @@ failure detail when Prowlarr reports one. API keys and feed URLs are removed
 from diagnostics. The Indexers page exposes the same check with per-indexer
 results, which helps distinguish an invalid Prowlarr API key from an indexer
 feed returning `401 Unauthorized`.
+
+## Contract verification
+
+The HTTP-level tests cover the authenticated handshake, DAT catalog browsing,
+stable request identities, idempotent concurrent submission, rate and work
+limits, and request-scoped asset responses in
+[`tests/test_auth_http.py`](../tests/test_auth_http.py). DAT matching and its
+saved region policy are covered in
+[`tests/test_dat_catalog.py`](../tests/test_dat_catalog.py); request asset
+ownership and persistence are covered in
+[`tests/test_recent_consoles.py`](../tests/test_recent_consoles.py) and
+[`tests/test_store.py`](../tests/test_store.py). The packaged proof exercises
+two SeerrNG requests sharing one Hub transfer, then verifies that both can
+stream the exact imported bytes:
+[`scripts/prove_upstream_acquisition.py`](../scripts/prove_upstream_acquisition.py).

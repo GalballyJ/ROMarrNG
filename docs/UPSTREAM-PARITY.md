@@ -4,7 +4,9 @@
 [BlizzHacker/romarr `main` at `31fefb0330e995c00350546d1470e6dcfa0fe117`](https://github.com/BlizzHacker/romarr/commit/31fefb0330e995c00350546d1470e6dcfa0fe117),
 which reports ROMarr v1.1.0. ROMarrNG's last upstream merge before this review
 is `c9c2b940484a32073d46ddadee8998b69bf86336` (merging upstream `06378a70`).
-Recheck these references as either project changes.
+Recheck these references as either project changes. The detailed
+[implementation report](UPSTREAM_IMPLEMENTATION_REPORT.md) and
+[item-by-item audit](UPSTREAM_AUDIT.md) record the work against this snapshot.
 
 ## Why we keep a fork
 

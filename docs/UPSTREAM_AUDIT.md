@@ -4,6 +4,8 @@ Snapshot: 2026-10-12, BlizzHacker/romarr main `31fefb0330e995c00350546d1470e6dcf
 Scope: all 48 issues/PRs returned by the paginated GitHub API, including closed items:
 25 issues and 23 PRs. Only #47 and #48 were open at snapshot time.
 Machine-readable inventory: [upstream-audit.json](upstream-audit.json).
+For the implementation summary, merge and test evidence, SeerrNG impact, and
+remaining verification limits, see the [upstream implementation report](UPSTREAM_IMPLEMENTATION_REPORT.md).
 
 “Existing coverage” means implementation and relevant regression coverage exist in this fork;
 it does not mean this session recreated the reporter's deployment. “Implemented/adapted”
@@ -122,11 +124,12 @@ close every report without deployment checks or that maintainers must accept the
 
 ## Validation
 
-The repository's isolated Python 3.13 validation runner (`python -m
-scripts.validation_engine.engine --tests-only`) passed all three tasks:
-**2,296 tests passed, 2 skipped, 1 network test deselected**. The rendered
-JavaScript parser regression ran with Node available. Plan SHA-256:
-`1140efe250f0e2a2ef6c43617d3623fc4cdcbaa0eb8cabe44e4bf59f4ee6af0b`.
+The final implementation head for ROMarrNG PR #15 was
+`be7c7f053f2c448005fccc859439f627f38d0046`. Its isolated Python 3.13 full-suite
+run completed with **2,317 passed, 3 skipped, and 1 network test deselected**.
+Focused regressions, trusted-launcher contracts, the rendered JavaScript parser,
+and release-note checks are listed in the
+[implementation report](UPSTREAM_IMPLEMENTATION_REPORT.md).
 
 Both `Dockerfile` (Alpine) and `Dockerfile.browser` (Debian) built for Linux amd64.
 `scripts/prove_upstream_acquisition.py` passed in both images, proving sandbox socket
@@ -138,4 +141,5 @@ An isolated Chromium session exercised the Switch Collections controls, previewe
 one base v0, changed the form after preview, and requested the original previewed
 set successfully. The disposable browser and fixture server were stopped afterward.
 Release-note metadata, all 48 unique inventory entries, and `git diff --check` passed.
-Only documentation was updated after the final local suite to record this evidence.
+The GitHub-hosted PR checks were still queued when the change merged; see the
+implementation report and live [PR #15 check status](https://github.com/snapetech/ROMarrNG/pull/15).

@@ -75,6 +75,7 @@ full claim-by-claim evidence file.*
 - [Multiple libraries](#multiple-libraries)
 - [Troubleshooting](#troubleshooting)
 - [Release history](CHANGELOG.md)
+- [Upstream backlog work](#upstream-backlog-work) — [implementation report](docs/UPSTREAM_IMPLEMENTATION_REPORT.md), [48-item audit](docs/UPSTREAM_AUDIT.md), [SeerrNG contract](docs/SEERRNG-INTEGRATION.md)
 - [Cartridge ecosystem](#cartridge-ecosystem)
 - [Why ROMarrNG is maintained](docs/UPSTREAM-PARITY.md)
 
@@ -1014,12 +1015,47 @@ python -m pytest tests/ -q
 Release selection, ROM identification and archive-entry safety are pure functions
 and are tested directly.
 
+## Upstream backlog work
+
+On 2026-10-12 we reviewed every issue and pull request returned by the
+paginated GitHub API for [BlizzHacker/romarr](https://github.com/BlizzHacker/romarr).
+The snapshot covered 48 items: 34 already had implementation and regression
+coverage here, 11 needed code changes or adaptations, and 3 were addressed by
+verifying the public image manifests and correcting fork references. The
+item-by-item inventory records the evidence and the limits for each report.
+
+The implementation closed the remaining code gaps in Switch cataloguing,
+Hub-powered Interactive Search, strict 1G1R region and translation filtering,
+completed-download identity matching, and the broken inline UI scripts. We
+also aligned Discord webhook requests with its documented client contract.
+Where the behavior affects SeerrNG, its DAT browsing and acquisition use the
+same saved region policy, request IDs remain stable across retries, and each
+request keeps its own status and access to imported files even when requests
+share a transfer. The integration guide documents the API and lifecycle.
+
+ROMarrNG pull request [#15](https://github.com/snapetech/ROMarrNG/pull/15)
+merged this work into the fork on 2026-10-12. The changes are available here
+for upstream maintainers to review or take; this does not close or modify any
+issue in BlizzHacker/romarr, and no upstream pull requests were opened. The
+audit is a snapshot, not a promise that future upstream reports are covered.
+Some reports still need the original installation, service, or network to
+verify the reporter-specific symptom.
+
+For the full change map, attribution, local validation results, pending hosted
+checks at merge time, and remaining deployment checks, see the
+[upstream implementation report](docs/UPSTREAM_IMPLEMENTATION_REPORT.md).
+The supporting documents are the [complete issue/PR audit](docs/UPSTREAM_AUDIT.md),
+[fork comparison](docs/UPSTREAM-PARITY.md), [SeerrNG API guide](docs/SEERRNG-INTEGRATION.md),
+[security model](SECURITY.md), [proof ledger](docs/PROOF.md), and
+[validation-engine guide](docs/development/validation-engine.md).
+
 ## State of the project
 
 An honest map of what is solid, what is thin, and where a contribution
-lands hardest. 1,170+ tests run on every push; the numbers below are per
-area, and "tested against fakes" means the protocol conversation is
-asserted but no live server was in the loop.
+lands hardest. CI runs the suite on pushes. In the 2026-10-12 local full-suite
+run, 2,317 tests passed, 3 were skipped, and 1 network test was deselected.
+The numbers below are per area, and "tested against fakes" means the protocol
+conversation is asserted but no live server was in the loop.
 
 | Area | Confidence | Why |
 |---|---|---|
@@ -1139,27 +1175,3 @@ just plausible.
 MIT — see [LICENSE](LICENSE).
 
 Unofficial. Not affiliated with or endorsed by the RomM, Gaseous or Retrom projects.
-
-### Upstream backlog coverage
-
-See [the upstream audit](docs/UPSTREAM_AUDIT.md) for the issue-by-issue inventory,
-implementation evidence, attribution, and deployment checks still needed.
-
-In **Collections**, choose **TitleDB (Switch)** to preview a set by title name or
-ID, select base games, updates or DLC, and request the latest listed versions
-or all listed versions. Name searches require `TITLED_NAMES=1`; ID searches work
-with the default catalogue. Presence is inferred from filename IDs and version
-tags and never reported as checksum verification.
-
-DAT collections also offer **Only selected regions** and configurable
-fan-translation languages; preference fallback and English remain the defaults.
-
-To use installed Hub sources in search, enable a plugin with search capability
-and add a **ROM Hub** client under Download Clients with a writable staging
-path. Fetches enter the normal import pipeline. Missing plugin confinement
-requires the same explicit operator opt-in as other Hub actions.
-
-SeerrNG's DAT catalog and acquisition use these saved region and translation settings.
-Each request receives its own status and assets even when requests share a download.
-The packaged integration proof is `scripts/prove_upstream_acquisition.py`; CI runs it
-against both image editions before publishing.
