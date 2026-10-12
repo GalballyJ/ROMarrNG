@@ -81,3 +81,19 @@ def test_plugin_install_errors_are_displayed_in_the_hub():
     assert "if(!r.ok||result.ok!==true)" in html
     assert "actionError=result.error||result.reason" in html
     assert "esc(actionError)" in html
+
+
+def test_every_rendered_inline_script_parses_as_javascript():
+    """Upstream #48: one bad help string disabled the entire dashboard."""
+    import shutil
+    import subprocess
+    import pytest
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required to syntax-check rendered JavaScript")
+    scripts = re.findall(r"<script[^>]*>(.*?)</script>", page(), re.S)
+    assert scripts
+    for script in scripts:
+        checked = subprocess.run([node, "--check"], input=script, text=True,
+                                 capture_output=True, timeout=15)
+        assert checked.returncode == 0, checked.stderr

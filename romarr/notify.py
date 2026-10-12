@@ -113,10 +113,13 @@ def _json_post(url: str, payload: dict, headers: dict | None = None) -> bool:
 # Each takes (config, message) and returns whether it was delivered.
 
 def _discord(cfg: dict, message: Message) -> bool:
+    from .app import VERSION
     payload = {"content": message.text()[:1900]}
     if cfg.get("username"):
         payload["username"] = cfg["username"]
-    return _json_post(cfg.get("url", ""), payload)
+    return _json_post(cfg.get("url", ""), payload, headers={
+        "User-Agent": f"DiscordBot (https://github.com/snapetech/ROMarrNG, {VERSION})",
+    })
 
 
 def _slack(cfg: dict, message: Message) -> bool:

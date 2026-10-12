@@ -35,8 +35,8 @@ def _index():
     index.add(SwitchTitle(
         title_id=MARIO_BASE, name="Super Mario Odyssey",
         versions={"65536": "2017-10-27"}))
-    # A DLC and an update of BotW: same 13-hex prefix, different low bits.
-    index.add(SwitchTitle(title_id=BOTW_BASE[:13] + "001",
+    # A DLC and an update of BotW: same application family, different low 13 bits.
+    index.add(SwitchTitle(title_id="01007ef00011f001",
                           versions={"65536": "2017-11-30"}))
     index.add(SwitchTitle(title_id=BOTW_BASE[:13] + "800",
                           versions={"196608": "2018-02-01"}))
@@ -74,10 +74,10 @@ def test_switch_name_does_not_resolve_to_nes():
 # ------------------------------------------------------ ID classification --
 
 def test_kind_comes_from_the_id_alone():
-    """Base, DLC and update are arithmetic on the low 12 bits -- no
+    """Base, DLC and update are arithmetic on the low 13 bits -- no
     database needed, which is the point."""
     assert classify_tid(BOTW_BASE) == "base"
-    assert classify_tid(BOTW_BASE[:13] + "001") == "dlc"
+    assert classify_tid("01007ef00011f001") == "dlc"
     assert classify_tid(BOTW_BASE[:13] + "800") == "update"
 
 
@@ -100,7 +100,7 @@ def test_case_and_0x_prefix_are_tolerated():
 
 
 def test_base_tid_of_groups_a_family():
-    assert base_tid_of(BOTW_BASE[:13] + "001") == BOTW_BASE
+    assert base_tid_of("01007ef00011f001") == BOTW_BASE
     assert base_tid_of(BOTW_BASE[:13] + "800") == BOTW_BASE
     assert base_tid_of("garbage") == ""
 
@@ -124,7 +124,7 @@ def test_lookup_misses_cleanly():
 
 
 def test_family_of_returns_base_dlc_and_update():
-    family = _index().family_of(BOTW_BASE[:13] + "001")
+    family = _index().family_of("01007ef00011f001")
     assert [t.title_id for t in family["base"]] == [BOTW_BASE]
     assert len(family["dlc"]) == 1
     assert len(family["update"]) == 1
@@ -160,7 +160,7 @@ def test_validate_accepts_an_explicit_title_id():
 
 def test_a_dlc_id_verifies_as_dlc():
     result = validate_switch_rom(
-        f"DLC [{BOTW_BASE[:13].upper()}001].nsp", index=_index())
+        f"DLC [01007EF00011F001].nsp", index=_index())
     assert result["valid"] and result["kind"] == "dlc"
 
 
@@ -199,3 +199,69 @@ def test_a_long_digit_run_is_not_mistaken_for_a_title_id():
     # The 16-digit window inside the run must NOT be extracted as an ID.
     result2 = validate_switch_rom("1234567890123456789012.nsp", index=_index())
     assert result2["status"] != "verified"
+
+
+def test_switch_collection_filters_kinds_and_latest_versions():
+    from romarr.titled import collection_plan
+    plan = collection_plan(_index(), [], query="Zelda", kinds="base", latest_only=True)
+    assert plan["titles"] and all(t["kind"] == "base" for t in plan["titles"])
+    assert plan["titles"][0]["version"] == 0
+    assert plan["counts"]["verified"] == 0
+    all_versions = collection_plan(_index(), [], query="Zelda", kinds="base", latest_only=False)
+    assert {t["version"] for t in all_versions["titles"]} == {0}
+
+
+def test_switch_collection_does_not_mistake_old_or_unversioned_files_for_latest():
+    from romarr.titled import collection_plan
+    old = f"Zelda [{BOTW_BASE}] [v65536]"
+    plan = collection_plan(_index(), [old, f"Zelda [{BOTW_BASE}]"], query=BOTW_BASE)
+    assert plan["counts"]["missing"] == 1
+    plan = collection_plan(_index(), [f"Zelda [{BOTW_BASE}] [v0]"], query=BOTW_BASE)
+    assert plan["counts"]["have"] == 1
+    assert plan["titles"][0]["status"] == "unknown"
+
+
+def test_switch_collection_start_queues_only_the_filtered_missing_versions(tmp_path):
+    from romarr.app import ROMarr
+    from romarr.titled import SWITCH_COLLECTION
+    service = ROMarr({"ROMARR_DATA": str(tmp_path / "state.json")})
+    service.titled = _index()
+    assert SWITCH_COLLECTION in service.dat_names()
+    assert service.collection_plan(SWITCH_COLLECTION).get("error")
+    started = service.collection_start(SWITCH_COLLECTION, query=BOTW_BASE, kinds="base")
+    assert started["ok"] and started["queued"] == 1
+    batch = next(iter(service._batches().values()))
+    assert batch.platform == "switch"
+    assert batch.queue == [f"The Legend of Zelda: Breath of the Wild [{BOTW_BASE}] [v0]"]
+
+
+def test_switch_requested_id_and_version_are_hard_selection_constraints():
+    from romarr.selection import Release, judge
+    platform = resolve("switch")
+    wanted = f"Zelda [{BOTW_BASE}] [v196608]"
+    def release(title):
+        return Release(title, 100 * 1024 * 1024, 10, (1000,), "magnet:test", "torrent", "test")
+    assert judge(release(wanted), wanted, platform).points > 0
+    assert judge(release(f"Zelda [{BOTW_BASE}] [v65536]"), wanted, platform).points < 0
+    assert judge(release("Zelda [v196608]"), wanted, platform).points < 0
+
+
+def test_real_titledb_product_keys_and_patch_histories(monkeypatch):
+    from romarr import titled
+    monkeypatch.setattr(titled, "fetch_versions", lambda _: {
+        BOTW_BASE: {"65536": "2017", "196608": "2018"},
+        BOTW_BASE[:13] + "800": {"131072": "2017"}})
+    monkeypatch.setattr(titled, "_load_cached_or_fetch", lambda *args: {
+        "70010000000025": {"id": BOTW_BASE.upper(), "name": "Zelda", "size": "bad"},
+        "70010000096817": {"id": BOTW_BASE.upper(), "name": "Zelda Switch 2 Edition"},
+        "70050000000183": {"id": "01007EF00011F001", "name": "Expansion", "size": 1}})
+    index = titled.build_index(with_names=True)
+    assert index.lookup_by_id(BOTW_BASE).name == "Zelda"
+    assert index.lookup_by_id(BOTW_BASE).size == 0
+    plan = titled.collection_plan(index, [], query=BOTW_BASE, kinds="base,dlc,update")
+    assert {t["kind"] for t in plan["titles"]} == {"base", "dlc", "update"}
+    patch = next(t for t in plan["titles"] if t["kind"] == "update")
+    assert patch["version"] == 196608 and patch["name"].startswith("Zelda ")
+    assert len(index.family_of("01007ef00011f001")["dlc"]) == 1
+    all_patches = titled.collection_plan(index, [], query="Zelda", kinds="update", latest_only=False)
+    assert {t["version"] for t in all_patches["titles"]} == {65536, 131072, 196608}

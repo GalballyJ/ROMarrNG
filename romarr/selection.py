@@ -313,6 +313,18 @@ def judge(release: Release, wanted: str,
             return Judgement(-900, verdict=refusal)
     if not is_game_release(release):
         return Judgement(-1000, verdict="not a game release (wrong category)")
+    if platform and platform.slug == "switch":
+        from .titled import _TITLE_TAG, _VERSION_TAG
+        wanted_id, wanted_version = _TITLE_TAG.search(wanted), _VERSION_TAG.search(wanted)
+        actual_id, actual_version = _TITLE_TAG.search(release.title), _VERSION_TAG.search(release.title)
+        if wanted_id and (not actual_id or wanted_id[1].lower() != actual_id[1].lower()):
+            return Judgement(-500, verdict="Switch title ID does not match")
+        if wanted_version and (not actual_version or int(wanted_version[1]) != int(actual_version[1])):
+            return Judgement(-500, verdict="Switch version does not match")
+    from .collections import translation_langs_in
+    requested_languages = translation_langs_in(wanted)
+    if requested_languages and not requested_languages <= translation_langs_in(release.title):
+        return Judgement(-500, verdict="requested translation language does not match")
     if not title_matches(release.title, wanted):
         return Judgement(-500, verdict=f"title does not match {wanted!r}")
 

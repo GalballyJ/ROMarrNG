@@ -96,3 +96,73 @@ def test_real_debrid_passes_the_torrent_hash_to_the_importer(tmp_path):
     }
     client._fetch_links = lambda links, target: True
     assert client.completed()[0]["hash"] == HASH
+
+
+def test_active_identity_match_wins_over_an_old_imported_row():
+    old = QueueItem("Old", "nes", "Old name", 1, "imported", release_id=f"btih:{HASH}")
+    new = QueueItem("New", "nes", "New name", 1, "grabbed", release_id=f"btih:{HASH}")
+    assert match_queue_item([old, new], {"hash": HASH}) is new
+
+
+def test_conflicting_job_ids_cannot_fall_back_to_same_title():
+    item = QueueItem("Game", "nes", "Same title", 1, "grabbed", download_id="A")
+    assert match_queue_item([item], {"id": "B", "name": "Same title"}) is None
+
+
+def test_conflicting_hashes_cannot_fall_back_to_same_title():
+    item = QueueItem("Game", "nes", "Same title", 1, "grabbed", release_id=f"btih:{HASH}")
+    assert match_queue_item([item], {"hash": "f" * 40, "name": "Same title"}) is None
+
+
+def test_renamed_import_fulfils_original_request_and_keeps_translation_layout(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import romarr.app as app
+    service = ROMarr({"ROMARR_DATA": str(tmp_path / "state.json")})
+    queued = QueueItem("Requested title", "snes", "Requested title [T-De]", 1,
+                       "grabbed", download_id="job")
+    service.queue.append(queued)
+    service.store.want("Requested title", "snes")
+    class Client:
+        configured = True
+        def completed(self):
+            return [{"id": "job", "name": "renamed.sfc", "content_path": str(tmp_path)}]
+    service.clients = [Client()]
+    target = tmp_path / "library" / "rom.sfc"
+    calls = []
+    def imported_file(*args, **kwargs):
+        calls.append(kwargs)
+        return [SimpleNamespace(ok=True, destination=target, verification=None)]
+    monkeypatch.setattr(app, "import_rom", imported_file)
+    monkeypatch.setattr(service, "library_for", lambda slug: ({}, SimpleNamespace(name="test")))
+    monkeypatch.setattr(service, "notify", lambda message: None)
+    service.store.settings["rescan_after_import"] = False
+    assert service.import_finished(retry_failed=False)[0]["ok"]
+    assert calls[0]["translation"] is True
+    assert service.store.wanted == []
+    assert queued.state == "imported"
+
+
+def test_base32_magnets_match_hex_completion_and_legacy_queue_rows():
+    import base64
+    from romarr.profiles import release_id
+    from types import SimpleNamespace
+    encoded = base64.b32encode(bytes.fromhex(HASH)).decode()
+    assert release_id(SimpleNamespace(download_url=f"magnet:?xt=urn:btih:{encoded}")) == f"btih:{HASH}"
+    old = QueueItem("Game", "nes", "Old title", 1, "grabbed", release_id=f"btih:{encoded.lower()}")
+    assert match_queue_item([old], {"name": "renamed", "hash": HASH}) is old
+
+
+def test_matching_is_scoped_to_download_client():
+    item = QueueItem("Game", "nes", "same", 1, "grabbed", download_id="1", download_client_id="A")
+    assert match_queue_item([item], {"id": "1", "name": "same"}, client_id="B") is None
+    assert match_queue_item([item], {"id": "1"}, client_id="A") is item
+
+
+def test_shared_download_fails_all_requests_without_a_library(tmp_path):
+    service = ROMarr({"ROMARR_DATA": str(tmp_path / "state.json")})
+    from types import SimpleNamespace
+    service.clients = [SimpleNamespace(configured=True, completed=lambda: [{"id": "shared"}])]
+    service.queue.extend(QueueItem("Game", "snes", "release", 1, "grabbed", download_id="shared",
+                                   external_request_id=f"seerr-{i}") for i in range(2))
+    service.import_finished(retry_failed=False)
+    assert [item.state for item in service.queue] == ["import-failed", "import-failed"]

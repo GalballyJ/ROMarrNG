@@ -244,6 +244,201 @@ def install(slug: str) -> dict:
     return _run_cli("plugin", "install", slug)
 
 
+# ------------------------------------------------------------- search/fetch --
+#
+# The two in-process bridges the acquisition pipeline needs: `search` asks
+# every enabled plugin that declares the capability, and `fetch` downloads one
+# chosen result into a staging directory through the plugin's own gated plan.
+# Both go through the Hub's own machinery -- PluginProcess, FetchPlan
+# allowlisting, HttpDownloader -- so the confinement and network policy a
+# plugin runs under are the Hub's, not a copy of them here.
+
+import base64
+import json as _json
+
+HUB_SCHEME = "hub://"
+
+
+def encode_result(row: dict) -> str:
+    """A search result as a grabbable URL.
+
+    The download pipeline speaks URLs: `Release.download_url` is what
+    `hand_off` gives a client. A hub result is not a URL -- it is a
+    (plugin, source_id) pair the plugin can turn back into a FetchPlan -- so
+    the whole row rides along, base64-encoded. Opaque by design: nothing
+    downstream parses it except `fetch`, and a credential-free encoding keeps
+    it safe to store in the ledger and the queue.
+    """
+    raw = _json.dumps(row, sort_keys=True).encode("utf-8")
+    if len(raw) > 65536:
+        raise ValueError("Hub result is too large")
+    payload = base64.urlsafe_b64encode(raw).decode("ascii")
+    return HUB_SCHEME + payload
+
+
+def decode_result(url: str) -> dict:
+    """The search result inside a `hub://` URL. Raises ValueError if it is
+    not one or does not decode -- a corrupt ledger row must fail loudly, not
+    silently fetch nothing."""
+    if not str(url or "").startswith(HUB_SCHEME):
+        raise ValueError("not a hub:// URL")
+    if len(url) > 90000:
+        raise ValueError("Hub URL is too large")
+    try:
+        raw = base64.urlsafe_b64decode(
+            url[len(HUB_SCHEME):].encode("ascii"))
+        row = _json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("undecodable hub URL") from exc
+    if not isinstance(row, dict) or not row.get("source_id"):
+        raise ValueError("hub URL carries no source_id")
+    if not isinstance(row.get("plugin"), str) or not row["plugin"]:
+        raise ValueError("hub URL carries no plugin")
+    return row
+
+
+def _unsandboxed() -> bool:
+    """Whether Hub calls from this process may run plugins unconfined.
+
+    Apply the same explicit operator opt-in as the CLI bridge.
+    """
+    ok, why = sandbox_state()
+    if not ok:
+        if os.environ.get("ROMARR_ALLOW_UNSANDBOXED_PLUGINS") != "1":
+            raise RuntimeError("ROM Hub plugin confinement is unavailable: " + why)
+        log.warning("ROM Hub calls run WITHOUT confinement by explicit "
+                    "operator choice: %s", why)
+    return not ok
+
+
+def searchable_plugins() -> list[str]:
+    """Slugs of installed, enabled plugins that declare `search`."""
+    try:
+        _, registry = _import()
+        reg = registry.Registry(HOME)
+        return sorted(p.slug for p in reg.installed()
+                      if getattr(p, "enabled", True)
+                      and "search" in (getattr(p.manifest, "capabilities", ())
+                                       or ()))
+    except Exception:
+        return []
+
+
+def search(query: str, platform: str | None = None, limit: int = 25,
+           timeout: float = 30.0) -> tuple[list[dict], str]:
+    """Search every enabled ROM Hub plugin, merged.
+
+    Returns `(rows, error)`. Rows are plain dicts with the Hub's SearchResult
+    fields (source_id, title, platform, size_bytes, url, plugin). `error` is
+    a string when the Hub itself could not be used at all; a single plugin
+    failing is not an error -- the Hub's fan-out already isolates those, and
+    "two of three sources answered" is a normal search, not a fault.
+    """
+    try:
+        from rom_hub import registry as _registry
+        from rom_hub.broker.fetcher import HttpxFetcher
+        from rom_hub.dispatcher import search_all
+        from rom_hub.cli import prepare_assets, prepare_secrets
+    except Exception as exc:
+        return [], f"ROM Hub is not installed: {exc}"
+    try:
+        plugins = [p for p in _registry.Registry(HOME).installed()
+                   if getattr(p, "enabled", True)
+                   and "search" in (getattr(p.manifest, "capabilities", ())
+                                    or ())]
+    except Exception as exc:
+        return [], f"could not read the plugin registry: {exc}"
+    if not plugins:
+        return [], ""
+    fetcher = HttpxFetcher()
+    try:
+        outcome = search_all(plugins, fetcher=fetcher, query=query,
+                             platform=platform, limit=limit, timeout=timeout,
+                             assets_for=lambda plugin: prepare_assets(plugin, HOME),
+                             secrets_for=lambda plugin: prepare_secrets(plugin, HOME),
+                             allow_unsandboxed=_unsandboxed())
+    except Exception as exc:
+        return [], f"ROM Hub search failed ({type(exc).__name__})"
+    finally:
+        fetcher.close()
+    statuses = getattr(outcome, "statuses", [])
+    if statuses and all(not status.ok for status in statuses):
+        return [], "All enabled ROM Hub search plugins failed; check their configuration and connectivity."
+    rows = []
+    for r in outcome.results:
+        try:
+            rows.append(r.model_dump())
+        except Exception:  # pragma: no cover -- pydantic model, always dumps
+            rows.append(dict(r))
+    return rows, ""
+
+
+def fetch(row: dict, dest_dir) -> dict:
+    """Download one search result into `dest_dir` through its plugin.
+
+    The plugin is asked for a FetchPlan -- the Hub re-validates the shape and
+    allowlists every URL against the manifest's declared hosts -- and the
+    Hub's own downloader streams the files. This is the download half of the
+    Hub's `import`; the upload half deliberately does not run here, because
+    ROMarr's import pipeline (DAT verification, naming, history, blocklist)
+    owns what happens to a finished file.
+    """
+    from pathlib import Path
+    try:
+        from rom_hub import registry as _registry
+        from rom_hub.broker.fetcher import HttpxFetcher
+        from rom_hub.broker.host import PluginProcess
+        from rom_hub.importer import HttpDownloader
+        from rom_hub.types import SearchResult
+        from rom_hub.cli import prepare_assets, prepare_secrets
+    except Exception as exc:
+        return {"ok": False, "error": f"ROM Hub is not installed: {exc}",
+                "files": []}
+    slug = str(row.get("plugin") or "")
+    try:
+        result = SearchResult(**row)
+    except Exception as exc:
+        return {"ok": False, "error": f"invalid hub result: {exc}", "files": []}
+    try:
+        plugin = _registry.Registry(HOME).get(slug)
+    except Exception as exc:
+        return {"ok": False,
+                "error": f"plugin {slug!r} is not installed: {exc}",
+                "files": []}
+    if not getattr(plugin, "enabled", True):
+        return {"ok": False,
+                "error": f"plugin {slug!r} is disabled", "files": []}
+    dest = Path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    fetcher = HttpxFetcher()
+    try:
+        with PluginProcess(plugin_dir=plugin.path, manifest=plugin.manifest,
+                           config=getattr(plugin, "config", {}) or {},
+                           fetcher=fetcher,
+                           data_assets=prepare_assets(plugin, HOME),
+                           secrets=prepare_secrets(plugin, HOME),
+                           allow_unsandboxed=_unsandboxed()) as proc:
+            plan = proc.plan(result)
+            with HttpDownloader(
+                    allowlist=list(getattr(plugin.manifest, "network", [])
+                                   or [])) as downloader:
+                files = []
+                for f in plan.files:
+                    destination = (dest / f.relative_path()).resolve()
+                    if not destination.is_relative_to(dest.resolve()):
+                        raise ValueError("plugin output escapes the staging directory")
+                    saved = downloader.download(f.url,
+                                                destination,
+                                                f.size_bytes)
+                    files.append(str(saved))
+    except Exception as exc:
+        return {"ok": False,
+                "error": f"plugin fetch failed ({type(exc).__name__})", "files": []}
+    finally:
+        fetcher.close()
+    return {"ok": True, "error": "", "files": files}
+
+
 def _set_enabled(slug: str, on: bool) -> dict:
     """Toggle enable/disable through the registry directly — no subprocess."""
     try:
