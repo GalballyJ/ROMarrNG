@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.5] - 2026-10-12
+
+### User-facing changes
+
+#### Fixed
+
+- **Imports:** Completed downloads now match their queue entries by client job ID or torrent hash before title, so renamed jobs are still imported and older saved queue rows remain compatible.
+- **Library:** ROMarr refreshes password-grant RomM tokens before expiry and safely retries RomM 5.3.1's expired-token error, keeping library reads available without treating a real server outage as an authentication failure.
+
 ## [0.14.4] - 2026-10-12
 
 ### User-facing changes
