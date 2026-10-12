@@ -6,28 +6,31 @@ layer to record which source and test inventory produced each result.
 ## Local use
 
 ```sh
-python3.13 -m scripts.validation_engine.engine --plan --tests-only --json
-python3.13 -m scripts.validation_engine.engine --task pytest-suite
-python3.13 -m scripts.validation_engine.engine --tests-only
-python3.13 -m scripts.validation_engine.engine
+node /path/to/trusted-test-launcher.mjs "$PWD" -- python3.13 -m pytest tests/ -q
 ```
 
-Local execution of test tasks requires the trusted Linux bubblewrap launcher.
+The local command runs an already-configured Python 3.13 environment inside the
+trusted, offline Linux bubblewrap launcher. Have pytest and `requirements.txt`
+dependencies installed in that environment before running it; the launcher
+does not install candidate dependencies or inherit package-index credentials.
 When evaluating an unreviewed branch, copy `trusted-test-launcher.mjs` from a
-reviewed revision to a location outside the checkout and run:
+reviewed revision to a location outside the checkout. Its default command is
+the same pytest invocation:
 
 ```sh
-node /path/to/trusted-test-launcher.mjs "$PWD" -- python3.13 -m scripts.validation_engine.engine --tests-only
+node /path/to/trusted-test-launcher.mjs "$PWD"
 ```
 
-Run planning for an unreviewed candidate through that launcher too, because
-planning imports its validation configuration. GitHub Actions remains
-responsible for hosted validation.
+The launcher has no network access. It copies candidate files into a temporary
+workspace without `.git` or local secrets, makes the host filesystem read-only,
+and masks common user-data locations. Run planning for an unreviewed candidate
+through it too, because planning imports candidate validation configuration.
+GitHub Actions remains responsible for receipt-backed hosted validation.
 
-`--plan` discovers files and required commands without installing packages or
-running pytest. An execution creates a disposable Python 3.13 virtual
-environment under its private temporary directory, installs the repository
-requirements and pytest there, then runs the native suite. The test task uses
+In CI, `--plan` discovers files and required commands without installing
+packages or running pytest. The hosted execution creates a disposable Python
+3.13 virtual environment under its private temporary directory, installs the
+repository requirements and pytest there, then runs the native suite. The test task uses
 `pytest.ini` as configured, including its default `not network`
 marker, so tests that reach the public internet remain deselected. The engine
 counts passed, skipped, failed, and deselected tests from pytest's summary and
@@ -47,10 +50,16 @@ execution blocks the result. No result cache is reused.
 
 Runtime probes and child commands receive only an inherited allowlist for
 executable paths, platform process variables, locale, and timezone, plus child
-tasks' declared settings. Each task uses run-owned home, temporary, XDG, and pip
-cache directories, and Python user-site packages are disabled. Test children receive
-`CI=true`; ambient credentials, Python path injection, proxy settings, and
-user configuration paths are not inherited.
+tasks' declared settings. Proxy, private-index, and custom CA settings are
+passed only to the dependency-install task; pytest never receives them. Each
+task uses run-owned home, temporary, XDG, and pip cache directories, and Python
+user-site packages are disabled. Test children receive `CI=true`; ambient
+credentials, Python path injection, and user configuration paths are not
+inherited. On Linux the runner also disables procfs access to its own process
+environment while a task child is running. This requires a non-root runner
+without `CAP_SYS_PTRACE`; the engine refuses to start a task when that boundary
+cannot be enforced or the runner's original dumpability state cannot be
+restored.
 
 The CI job exports a short-lived receipt from the Linux x64 pytest runner. The
 image job checks its run ID, attempt, commit, runner identity, case count, and
@@ -58,6 +67,10 @@ inventory digest against the image job's own checkout before building an image.
 This confirms the artifact came from the current workflow attempt and the same
 source snapshot; it does not replace the local test evidence.
 
-The workflow currently installs `requirements.txt` and pytest without a Python
-dependency lockfile. The engine binds those manifests and the Python 3.13
-runtime, but dependency versions are not yet reproducible from a lockfile.
+The `install-test-dependencies` task runs only in hosted CI. Running the engine's
+`--tests-only` selection locally is intentionally refused because it includes
+that package-install task; use the trusted launcher with the preconfigured
+Python environment instead. The workflow currently installs `requirements.txt`
+and pytest without a Python dependency lockfile. The engine binds those
+manifests and the Python 3.13 runtime, but dependency versions are not yet
+reproducible from a lockfile.

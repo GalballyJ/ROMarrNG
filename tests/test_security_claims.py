@@ -104,10 +104,27 @@ def test_the_unauthenticated_health_response_is_one_bit(tmp_path):
 def test_the_document_admits_what_is_not_protected(doc):
     """The section that makes the rest credible."""
     assert "What is not protected" in doc
-    for admission in ("No filesystem confinement",
+    for admission in ("No protection from a compromised shared kernel",
                       "No encryption at rest",
                       "No multi-user model", "not a security control"):
         assert admission in doc
+    assert "Landlock restricts" in doc
+
+
+def test_workflow_checkouts_do_not_persist_credentials():
+    workflow = pathlib.Path(__file__).resolve().parents[1] / ".github/workflows/docker.yml"
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    checkout_lines = [
+        index for index, line in enumerate(lines)
+        if "uses: actions/checkout@" in line
+    ]
+    assert checkout_lines
+    for index in checkout_lines:
+        step = lines[index:index + 7]
+        assert any("persist-credentials: false" in line for line in step), (
+            "candidate-controlled workflow code could read the checkout token "
+            "from .git/config"
+        )
 
 
 def test_versions_at_or_below_v0_7_0_are_called_out(doc):

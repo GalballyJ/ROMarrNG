@@ -4,6 +4,13 @@
 
 ### User-facing changes
 
+#### Fixed
+
+- **Plugins:** ROM Hub workers now apply filesystem confinement before plugin code loads, block permission changes and child processes, and keep scratch on bounded tmpfs storage. Plugins can no longer read ROMarr configuration, Hub state or stored Hub secrets through the host filesystem.
+- **SeerrNG:** DAT-backed requests match common region aliases such as `(USA)` and `(U)`, active retries keep their current status, and ROM Hub fetch failures close the linked request.
+- **Collections:** Translation language and exclusion rules now apply when 1G1R is disabled, and Hub platform metadata contributes verified console evidence to release scoring.
+- **Switch:** TitleDB initializes on first Switch use even when no DAT directory is configured.
+
 #### Removed
 
 - **Packaging:** This repository no longer contains YunoHost packaging or updates the YunoHost app repository. Existing YunoHost installations will no longer receive package updates through ROMarrNG.

@@ -329,6 +329,9 @@ them.
 ## From source
 
 Python 3.11 or newer. Dependencies are `requests` plus, on Linux, `pyseccomp`.
+The host kernel must support Landlock and provide a finite tmpfs for the ROM Hub
+plugin scratch directory. The supplied Docker Compose file mounts `/tmp` as a
+256 MiB tmpfs; elsewhere ROMarr can use a tmpfs such as `/dev/shm`.
 
 ```bash
 git clone https://github.com/snapetech/ROMarrNG.git && cd ROMarrNG
@@ -610,11 +613,12 @@ Do not set both names for the same thing — the new one wins.
 | `ROMARR_PLAYERS` | all four | `emulatorjs,ruffle,jsdos,emularity`, best first. `none` turns every browser route off. Empty means all four, not none |
 | `ROMARR_JSDOS_URL` / `ROMARR_EMULARITY_URL` | unset | Where your own js-dos and Emularity live. Without one, ROMarr reports that the player *would* run a file and names the setting that would let it link there |
 | `ROMARR_PUBLIC_URL` / `ROMARR_PEER_NAME` | unset / `ROMarr` | How a friend's server reaches this one. Peering is the only feature that needs ROMarr to know its own address |
-| `ROMARR_ALLOW_UNSANDBOXED_PLUGINS` | unset | Set to `1` only to allow ROM Hub plugins when seccomp is unavailable; normal operation requires the plugin sandbox. |
+| `ROMARR_ALLOW_UNSANDBOXED_PLUGINS` | unset | Set to `1` only to allow ROM Hub plugins when Landlock, seccomp, or bounded tmpfs scratch is unavailable; normal operation requires all three. |
 
-ROM Hub plugins require seccomp isolation. When the sandbox is unavailable,
-plugin operations stop unless `ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1` explicitly
-opts out of that protection.
+ROM Hub plugins require Landlock filesystem confinement, seccomp network,
+process and metadata restrictions, and a finite tmpfs for scratch. When any of
+these requirements is unavailable, plugin operations stop unless
+`ROMARR_ALLOW_UNSANDBOXED_PLUGINS=1` explicitly opts out.
 
 ---
 

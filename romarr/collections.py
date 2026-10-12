@@ -387,9 +387,12 @@ def build_plan(dat: Dat, present: dict[str, str], policy: Policy) -> Plan:
             # call, not a guess.
             winner_outside = _region_rank(winner.name, order) >= len(order)
             strict = policy.region_mode == "strict"
-            translation_members = ([m for m in members
-                                    if _region_rank(m.name, order) < len(order)]
-                                   if strict else members)
+            translation_members = [
+                m for m in members
+                if is_translation(m.name)
+                and policy.wants(m.name)[0]
+                and (not strict or _region_rank(m.name, order) < len(order))
+            ]
             translation = _best_translation(translation_members, order,
                                             policy.translation_langs)
             if policy.uses_translations and translation is not None:
@@ -455,6 +458,8 @@ def build_plan(dat: Dat, present: dict[str, str], policy: Policy) -> Plan:
                 outside_preference=winner_outside,
             ))
         else:
+            normal_members: list[Game] = []
+            translation_members: list[Game] = []
             for game in sorted(members, key=lambda g: g.name):
                 wanted, why = policy.wants(game.name)
                 if not wanted:
@@ -464,12 +469,70 @@ def build_plan(dat: Dat, present: dict[str, str], policy: Policy) -> Plan:
                 if policy.region_mode == "strict" and outside:
                     plan.region_omitted += 1
                     continue
+                if is_translation(game.name):
+                    translation_members.append(game)
+                    continue
+                normal_members.append(game)
                 plan.titles.append(Title(
                     name=game.name, parent=parent,
                     status=present.get(game.name, MISSING),
                     chosen_because="every dump kept (1G1R off)",
                     outside_preference=outside,
                 ))
+
+            # 1G1R-off keeps the normal DAT variants, but the translation
+            # policy still controls which fan translations are eligible and
+            # when one joins that full set. `prefer` replaces the best
+            # in-region normal dump; `keep_both` retains all normal dumps.
+            if policy.uses_translations:
+                translation = _best_translation(
+                    [game for game in translation_members
+                     if (policy.region_mode != "strict"
+                         or _region_rank(game.name, order) < len(order))],
+                    order, policy.translation_langs)
+                preferred_normal = [
+                    game for game in normal_members
+                    if _region_rank(game.name, order) < len(order)
+                ]
+                take_it = (
+                    policy.translation_policy in ("prefer", "keep_both")
+                    or not preferred_normal
+                )
+                if translation is not None and take_it:
+                    replaced = None
+                    if (policy.translation_policy == "prefer"
+                            and preferred_normal):
+                        replaced = min(
+                            preferred_normal,
+                            key=lambda game: (_region_rank(game.name, order),
+                                              0 if not game.cloneof else 1,
+                                              game.name),
+                        )
+                        plan.titles = [
+                            title for title in plan.titles
+                            if not (title.parent == parent
+                                    and title.name == replaced.name)
+                        ]
+                    if policy.region_mode == "strict" and \
+                            _region_rank(translation.name, order) >= len(order):
+                        plan.region_omitted += 1
+                    else:
+                        reason = (
+                            f"{_lang_label(translation.name)} translation "
+                            f"preferred over {replaced.name}"
+                            if replaced else
+                            f"{_lang_label(translation.name)} translation "
+                            "added to the set"
+                        )
+                        plan.titles.append(Title(
+                            name=translation.name, parent=parent,
+                            status=present.get(translation.name, MISSING),
+                            chosen_because=reason,
+                            outside_preference=(
+                                _region_rank(translation.name, order)
+                                >= len(order)),
+                            is_translation=True,
+                        ))
     return plan
 
 

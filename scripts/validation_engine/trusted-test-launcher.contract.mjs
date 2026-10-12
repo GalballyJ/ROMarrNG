@@ -42,6 +42,36 @@ const sandboxAvailable = (() => {
     ).status === 0
   );
 })();
+const nestedSandboxAvailable = (() => {
+  if (!sandboxAvailable) return false;
+  const result = spawnSync(
+    bwrap,
+    [
+      '--die-with-parent',
+      '--unshare-user',
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
+      '--proc',
+      '/proc',
+      '--tmpfs',
+      '/tmp',
+      '--',
+      bwrap,
+      '--die-with-parent',
+      '--unshare-user',
+      '--ro-bind',
+      '/',
+      '/',
+      '--',
+      '/bin/true',
+    ],
+    { stdio: 'ignore' }
+  );
+  return result.status === 0;
+})();
 
 test(
   'trusted launcher contains import-time candidate code before it runs',
@@ -54,7 +84,7 @@ test(
     const hostFile = path.join(parent, 'host-canary.txt');
     const browserCache = path.join(parent, 'playwright-cache');
     const outsideDependencies = path.join(parent, 'outside-dependencies');
-    const hostSocket = path.join(parent, 'host-canary.sock');
+    const hostSocket = path.join('/var/tmp', `rv-${process.pid}.sock`);
     const candidateWrite = path.join(source, 'launcher-write-canary.txt');
     mkdirSync(path.join(source, 'bin'), { recursive: true });
     mkdirSync(browserCache, { recursive: true });
@@ -70,6 +100,7 @@ test(
         await new Promise((resolve) => tcpServer.close(resolve));
       if (socketServer.listening)
         await new Promise((resolve) => socketServer.close(resolve));
+      rmSync(hostSocket, { force: true });
       rmSync(parent, { recursive: true, force: true });
     });
     mkdirSync(path.join(source, 'nested/config'), { recursive: true });
@@ -187,6 +218,109 @@ assert.throws(() => writeFileSync('/mnt/workspace/node_modules/marker.txt', 'cha
     assert.match(
       linkedDependencyResult.stderr,
       /Installed dependency path must be a real directory/u
+    );
+  }
+);
+
+test(
+  'trusted launcher hides checkout and sibling data outside common masks',
+  {
+    skip:
+      !nestedSandboxAvailable ||
+      !existsSync('/usr/local/share')
+        ? 'nested bubblewrap user namespaces or /usr/local/share are unavailable'
+        : false,
+  },
+  (t) => {
+    const parent = mkdtempSync(
+      path.join(tmpdir(), 'trusted-validation-source-mask-')
+    );
+    const source = path.join(parent, 'source');
+    const sibling = path.join(parent, 'sibling');
+    const workspaceRoot = '/usr/local/share/workspaces';
+    const virtualRoot = `${workspaceRoot}/romarrng-${path.basename(parent)}`;
+    const virtualSibling = `${workspaceRoot}/other-project-${path.basename(parent)}`;
+    mkdirSync(source, { recursive: true });
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(path.join(source, 'README.md'), 'safe candidate content\n');
+    writeFileSync(path.join(source, '.env'), 'PRIVATE_SOURCE_CANARY=hidden\n');
+    writeFileSync(path.join(source, 'secrets.json'), '{"secret":"hidden"}\n');
+    writeFileSync(path.join(sibling, '.env'), 'PRIVATE_SIBLING_CANARY=hidden\n');
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main'], {
+      cwd: source,
+    });
+    execFileSync('git', ['config', 'user.name', 'Fixture'], { cwd: source });
+    execFileSync('git', ['config', 'user.email', 'fixture@example.invalid'], {
+      cwd: source,
+    });
+    execFileSync('git', ['add', '--all'], { cwd: source });
+    execFileSync('git', ['commit', '--quiet', '-m', 'Source mask fixture'], {
+      cwd: source,
+    });
+    t.after(() => rmSync(parent, { recursive: true, force: true }));
+
+    const candidate = `
+      import assert from 'node:assert/strict';
+      import { readFileSync } from 'node:fs';
+      import path from 'node:path';
+      const source = ${JSON.stringify(virtualRoot)};
+      for (const file of ['.env', 'secrets.json', '.git/config']) {
+        assert.throws(() => readFileSync(path.join(source, file)), {
+          code: 'ENOENT',
+        });
+      }
+      assert.throws(
+        () => readFileSync(${JSON.stringify(`${virtualSibling}/.env`)}),
+        { code: 'ENOENT' }
+      );
+    `;
+    const result = spawnSync(
+      bwrap,
+      [
+        '--die-with-parent',
+        '--unshare-user',
+        '--ro-bind',
+        '/',
+        '/',
+        '--tmpfs',
+        '/usr/local/share',
+        '--dir',
+        workspaceRoot,
+        '--dir',
+        virtualRoot,
+        '--dir',
+        virtualSibling,
+        '--bind',
+        source,
+        virtualRoot,
+        '--bind',
+        sibling,
+        virtualSibling,
+        '--dev',
+        '/dev',
+        '--proc',
+        '/proc',
+        '--tmpfs',
+        '/tmp',
+        '--setenv',
+        'TMPDIR',
+        '/tmp',
+        '--',
+        process.execPath,
+        launcher,
+        virtualRoot,
+        '--',
+        process.execPath,
+        '-e',
+        candidate,
+      ],
+      { encoding: 'utf8', timeout: 30_000 }
+    );
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(
+      result.status,
+      0,
+      `${result.stdout ?? ''}${result.stderr ?? ''}`
     );
   }
 );

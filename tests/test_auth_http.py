@@ -304,6 +304,113 @@ def test_seerrng_request_admission_is_idempotent_under_concurrency(
     assert len(service.store.seerr_requests) == 1
 
 
+def test_dat_seerr_request_matches_region_alias_without_scoring_dat_suffix(
+    tmp_path, monkeypatch
+):
+    from romarr.app import ROMarr
+    from romarr.dat_catalog import dat_catalog_page
+    from romarr.selection import Release
+
+    service = ROMarr(env={"ROMARR_DATA": str(tmp_path / "state.json")})
+    service.dats.add(parse_dat(
+        '''<datafile><header><name>Nintendo - Super Nintendo Entertainment System</name></header>
+        <game name="Proof Game (USA)"/><game name="Proof Game (Japan)"/>
+        </datafile>'''
+    ))
+    service.store.settings["preferred_regions"] = ["usa"]
+    [catalog_game], _ = dat_catalog_page(service.dats.dats,
+                                         query="Proof Game")
+    external_id = "seerrng:dat-variant"
+    service.store.put_seerr_request(SeerrRequest(
+        external_id, "Proof Game", "snes", catalog_provider="dat",
+        catalog_key=catalog_game["catalogId"], status="searching",
+    ))
+    queried = []
+    releases = [
+        Release("Proof Game (Japan)", 3 * 1024 * 1024, 20, (1000,), "magnet:japan",
+                "torrent", "fixture"),
+        Release("Proof Game (PAL)", 3 * 1024 * 1024, 50, (1000,), "magnet:pal",
+                "torrent", "fixture"),
+        Release("Proof Game (U)", 3 * 1024 * 1024, 1, (1000,), "magnet:usa",
+                "torrent", "fixture"),
+    ]
+    monkeypatch.setattr(service, "_search_releases",
+                        lambda game, platform: (queried.append(game) or releases))
+    selected = []
+    monkeypatch.setattr(service, "grab",
+                        lambda pick, *args, **kwargs:
+                        (selected.append(pick) or {"ok": True}))
+
+    assert service.request("Proof Game", "snes", external_id)["ok"]
+    assert queried == ["Proof Game"]
+    assert [release.title for release in selected] == ["Proof Game (U)"]
+
+
+def test_dat_region_aliases_cover_pal_and_ntsc_tags():
+    from romarr.app import _seerr_dat_variant_matches
+
+    assert not _seerr_dat_variant_matches("Proof Game (USA)",
+                                          "Proof Game (PAL)")
+    assert _seerr_dat_variant_matches("Proof Game (USA)",
+                                      "Proof Game (NTSC-U)")
+    assert _seerr_dat_variant_matches("Proof Game (Japan)",
+                                      "Proof Game (NTSC-J)")
+
+
+def test_stale_failed_queue_row_does_not_mask_an_active_retry(server):
+    from romarr.app import _seerr_request_view
+    from romarr.store import QueueItem
+
+    _, service = server
+    external_id = "seerrng:retry-active"
+    request = SeerrRequest(external_id, "Retry Game", "snes",
+                           status="searching")
+    service.store.put_seerr_request(request)
+    service.queue.append(QueueItem(
+        "Retry Game", "snes", "old release", 5, "failed", "old failure",
+        external_request_id=external_id,
+    ))
+    view = _seerr_request_view(service, request)
+    assert view["status"] == "searching"
+    assert view["error"] is None
+    assert service.store.get_seerr_request(external_id).status == "searching"
+
+
+def test_retry_with_a_stale_failed_row_stays_searching_and_can_be_cancelled(
+    server, monkeypatch
+):
+    from romarr.store import QueueItem
+
+    base, service = server
+    external_id = "seerrng:retry-and-cancel"
+    request = SeerrRequest(external_id, "Retry Game", "snes",
+                           status="failed", error="old failure")
+    service.store.put_seerr_request(request)
+    service.queue.append(QueueItem(
+        "Retry Game", "snes", "old release", 5, "failed", "old failure",
+        external_request_id=external_id,
+    ))
+    starts = []
+    monkeypatch.setattr("romarr.app._start_seerr_dispatch",
+                        lambda svc, row: starts.append(row.external_request_id))
+    route = base + "/api/v1/integration/requests/" + external_id
+    key = service.auth.integration_key
+
+    code, body, _ = get(route + "/retry", key=key, method="POST", body={})
+    assert code == 202
+    view = json.loads(body)
+    assert view["status"] == "searching" and view["error"] is None
+    assert view["actions"]["cancel"] is True
+    assert starts == [external_id]
+    code, body, _ = get(route, key=key)
+    assert code == 200 and json.loads(body)["status"] == "searching"
+
+    code, body, _ = get(route + "/cancel", key=key, method="POST", body={})
+    assert code == 200 and json.loads(body)["status"] == "cancelled"
+    assert service.store.get_seerr_request(external_id).status == "cancelled"
+    service._seerr_dispatch_pool.release(external_id)
+
+
 def test_seerrng_dispatch_limit_refuses_new_work_without_persisting_it(server):
     base, service = server
     busy = [f"already-running-{index}" for index in range(4)]

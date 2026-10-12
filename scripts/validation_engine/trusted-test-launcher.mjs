@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Copy this file outside the checkout from a reviewed revision before using it
-// to execute a candidate tree. It runs no candidate JavaScript until bubblewrap
-// has isolated the candidate workspace, home, service sockets, and network.
+// to execute a candidate tree. It runs no candidate code until bubblewrap has
+// isolated the candidate workspace, home, service sockets, and network.
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
@@ -25,6 +25,37 @@ const GUEST_MARKER = '/run/validation-engine-sandbox';
 const GIT = ['/usr/bin/git', '/bin/git'].find(existsSync);
 const sensitiveName =
   /^(?:\.env(?:$|\.(?!example$)[^/]+)|\.ssh|\.aws|\.gnupg|id_(?:rsa|ed25519)|credentials?(?:\.[^/]+)?|secrets?(?:\.[^/]+)?|\.git-credentials|\.npmrc|\.pypirc|\.netrc|[^/]+\.(?:pem|key))$/iu;
+const workspaceDirectoryNames = new Set([
+  'workspace',
+  'workspaces',
+  'work',
+  'projects',
+  'repositories',
+  'repos',
+  'code',
+]);
+const systemRootDirectoryNames = new Set([
+  'bin',
+  'boot',
+  'dev',
+  'etc',
+  'home',
+  'lib',
+  'lib32',
+  'lib64',
+  'media',
+  'mnt',
+  'opt',
+  'proc',
+  'root',
+  'run',
+  'sbin',
+  'srv',
+  'sys',
+  'tmp',
+  'usr',
+  'var',
+]);
 
 function isSensitive(relativePath, tracked) {
   const segments = relativePath.split('/');
@@ -92,6 +123,23 @@ function isWithin(root, candidate) {
       !relative.startsWith(`..${path.sep}`) &&
       !path.isAbsolute(relative))
   );
+}
+
+function checkoutMaskRoot(sourceRoot) {
+  const root = path.parse(sourceRoot).root;
+  const segments = sourceRoot.slice(root.length).split(path.sep).filter(Boolean);
+  const workspaceIndex = segments.slice(0, -1).findIndex((segment) =>
+    workspaceDirectoryNames.has(segment.toLowerCase())
+  );
+  if (workspaceIndex !== -1)
+    return path.join(root, ...segments.slice(0, workspaceIndex + 1));
+
+  const topLevel = segments[0];
+  if (topLevel && !systemRootDirectoryNames.has(topLevel.toLowerCase()))
+    return path.join(root, topLevel);
+
+  const parent = path.dirname(sourceRoot);
+  return parent === root ? sourceRoot : parent;
 }
 
 function copyCandidateFile(sourceRoot, workspaceRoot, relativePath, tracked) {
@@ -222,6 +270,7 @@ function bubblewrapPath() {
 }
 
 function makeSandboxCommand({
+  checkoutMaskRoot,
   workspace,
   runDirectory,
   dependencies,
@@ -302,6 +351,8 @@ function makeSandboxCommand({
     '/',
     '/',
     '--tmpfs',
+    checkoutMaskRoot,
+    '--tmpfs',
     '/mnt',
     '--dir',
     GUEST_WORKSPACE,
@@ -340,7 +391,11 @@ function makeSandboxCommand({
     '--tmpfs',
     '/sys',
     '--tmpfs',
-    '/media'
+    '/media',
+    '--tmpfs',
+    '/opt',
+    '--tmpfs',
+    '/srv'
   );
   for (const directory of [
     env.HOME,
@@ -414,16 +469,13 @@ async function main() {
   }
   const targetCommand =
     separator === -1
-      ? [
-          process.execPath,
-          'bin/run-local-validation.mjs',
-          '--tests-only',
-          '--inside-sandbox',
-        ]
+      ? ['python3.13', '-m', 'pytest', 'tests/', '-q']
       : process.argv.slice(separator + 1);
   if (targetCommand.length === 0)
     throw new Error('Pass a candidate test command after --.');
   const sourceRoot = realpathSync(requestedRoot);
+  if (sourceRoot === path.parse(sourceRoot).root)
+    throw new Error('The source checkout cannot be the filesystem root.');
   const runDirectory = mkdtempSync(path.join(tmpdir(), 'trusted-validation-run-'));
   const workspace = path.join(runDirectory, 'workspace');
   mkdirSync(workspace, { mode: 0o700 });
@@ -444,6 +496,7 @@ async function main() {
     createSyntheticGitRepository(workspace, runDirectory);
     const dependencies = linkDependencies(sourceRoot, workspace);
     const command = makeSandboxCommand({
+      checkoutMaskRoot: checkoutMaskRoot(sourceRoot),
       workspace,
       runDirectory,
       dependencies,
