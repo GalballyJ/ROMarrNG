@@ -28,13 +28,26 @@ through it too, because planning imports candidate validation configuration.
 GitHub Actions remains responsible for receipt-backed hosted validation.
 
 In CI, `--plan` discovers files and required commands without installing
-packages or running pytest. The hosted execution creates a disposable Python
-3.13 virtual environment under its private temporary directory, installs the
-repository requirements and pytest there, then runs the native suite. The test task uses
+packages or running pytest. Pull requests, version-tag pushes, and manual runs
+targeting refs other than `main` use GitHub-hosted Ubuntu. Pushes to
+same-repository branches trigger CI, but only pushes to `main` and manual runs
+targeting `main` use the repository's `kspls0`-labelled Linux runner. Other
+branches, pull requests, and tags use GitHub-hosted runners. The hosted jobs
+use `setup-python`; the local job provisions Python 3.13 with a disposable uv
+virtualenv under the runner's private temporary directory. Both paths use the
+same validation engine, which installs repository requirements and pytest in
+a task environment before running the native suite. The test task uses
 `pytest.ini` as configured, including its default `not network`
 marker, so tests that reach the public internet remain deselected. The engine
 counts passed, skipped, failed, and deselected tests from pytest's summary and
 does not call an empty run successful.
+
+Pull-request image jobs smoke-test the Alpine image and build the browser
+image for its supported platforms, all with read-only repository permissions.
+Separate publishing jobs receive registry
+write and OIDC attestation permissions only for pushes to `main`, version
+tags, or manual runs targeting `main`. The release job runs only for version
+tags after both published images succeed.
 
 The engine writes a compact task summary to stderr at task start and completion,
 with a once-per-minute heartbeat during long tasks. Counts cover completed

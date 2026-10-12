@@ -1052,8 +1052,14 @@ The supporting documents are the [complete issue/PR audit](docs/UPSTREAM_AUDIT.m
 ## State of the project
 
 An honest map of what is solid, what is thin, and where a contribution
-lands hardest. CI runs the suite on pushes. In the 2026-10-12 local full-suite
-run, 2,317 tests passed, 3 were skipped, and 1 network test was deselected.
+lands hardest. CI runs the full suite on pull requests, same-repository branch
+pushes, and version tags. Only pushes to main and manual runs targeting
+main use the `kspls0`-labelled local Linux runner; other branches, pull
+requests, and version tags use GitHub-hosted runners. PR image builds use
+read-only permissions; only main and version-tag workflows, plus manual runs on
+main, can publish images. In the
+2026-10-12 local full-suite run, 2,319 tests passed, 3 were skipped, and 1
+network test was deselected.
 The numbers below are per area, and "tested against fakes" means the protocol
 conversation is asserted but no live server was in the loop.
 
