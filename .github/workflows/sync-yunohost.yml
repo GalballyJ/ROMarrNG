@@ -1,8 +1,7 @@
 name: sync-yunohost
 
 on:
-  push:
-    branches: [main]
+  # YunoHost distribution is paused; manual dispatch remains available if resumed.
   workflow_dispatch:
 
 permissions:
