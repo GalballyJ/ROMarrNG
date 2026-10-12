@@ -12,6 +12,7 @@ from scripts.validation_engine.engine import (
     acquire_lock,
     capture_candidate,
     create_plan,
+    format_validation_progress,
     inventory_files,
     parse_counts,
     release_lock,
@@ -74,6 +75,22 @@ def test_pytest_summary_counts_passed_skipped_failures_and_network_deselection()
     assert counts == {"passed": 12, "skipped": 2, "failed": 0, "excluded": 7}
     failed = parse_counts({"id": "pytest-suite", "parser": "pytest"}, "1 failed, 4 passed, 2 errors in 3s\n")
     assert failed["failed"] == 3
+
+
+def test_live_progress_summary_reports_completed_and_active_tasks() -> None:
+    tasks = [
+        {"id": "passed", "name": "Passed task"},
+        {"id": "blocked", "name": "Blocked task"},
+        {"id": "running", "name": "Long task"},
+    ]
+    results = {
+        "passed": {"status": "passed", "startedAt": "2026-10-12T00:00:00Z"},
+        "blocked": {"status": "blocked"},
+    }
+    assert format_validation_progress("sample", tasks, results, tasks[2], 65_000) == (
+        "[validation] sample: 1/3 selected tasks complete "
+        "(1 passed, 0 failed, 1 blocked, 1 pending); running Long task (1m05s)"
+    )
 
 
 def test_native_task_writes_private_log_and_records_result_counts(tmp_path: Path) -> None:

@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ ENGINE_VERSION = 1
 ROOT = Path(__file__).resolve().parents[2]
 SECRET_ENV = re.compile(r"(?:TOKEN|PASSWORD|SECRET|API[_-]?KEY|CREDENTIAL|COOKIE|AUTH|DATABASE_URL|DB_PASS|AWS_|AZURE_|GCP_)", re.I)
 IGNORED_DIRS = {".git", ".pytest_cache", "__pycache__", ".venv", "venv", "node_modules", "_output", "_tests", "TestResults", "coverage"}
+PROGRESS_INTERVAL_SECONDS = 60
 
 
 class ValidationError(RuntimeError):
@@ -307,6 +309,20 @@ def parse_counts(task: dict[str, Any], output: str) -> dict[str, int]:
     raise ValidationError("No native result parser is registered for task: " + task["id"])
 
 
+def format_validation_progress(repository: str, tasks: list[dict[str, Any]], results: dict[str, dict[str, Any]], current_task: dict[str, Any] | None = None, elapsed_ms: int = 0) -> str:
+    receipts = [results[task["id"]] for task in tasks if task["id"] in results]
+    passed = sum(receipt["status"] == "passed" for receipt in receipts)
+    failed = sum(receipt["status"] in {"failed", "incomplete"} for receipt in receipts)
+    blocked = sum(receipt["status"] in {"blocked", "not-run"} for receipt in receipts)
+    completed = passed + failed
+    pending = max(0, len(tasks) - completed - blocked)
+    active = ""
+    if current_task is not None:
+        seconds = elapsed_ms // 1000
+        active = f"; running {current_task.get('name', current_task['id'])} ({seconds // 60}m{seconds % 60:02d}s)"
+    return f"[validation] {repository}: {completed}/{len(tasks)} selected tasks complete ({passed} passed, {failed} failed, {blocked} blocked, {pending} pending){active}"
+
+
 def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]:
     start = time.monotonic()
     started_at = utc_now()
@@ -398,7 +414,7 @@ def release_lock(lock: tuple[Path, str]) -> None:
         pass
 
 
-def execute(root: Path, plan: dict[str, Any]) -> tuple[dict[str, Any], Path, int]:
+def execute(root: Path, plan: dict[str, Any], on_progress: Any = None) -> tuple[dict[str, Any], Path, int]:
     plan_body = dict(plan)
     plan_digest = plan_body.pop("planSha256", None)
     if plan_digest != digest_bytes(stable_json(plan_body).encode()):
@@ -417,9 +433,23 @@ def execute(root: Path, plan: dict[str, Any]) -> tuple[dict[str, Any], Path, int
     for task in plan["tasks"]:
         if not task["selected"]:
             by_id[task["id"]] = {"taskId": task["id"], "status": "excluded", "reason": plan["selection"], "required": task.get("required", True)}
+
+    progress_state: dict[str, str] = {}
+
+    def report_progress(current_task: dict[str, Any] | None = None, started: float = 0.0) -> None:
+        if on_progress is None:
+            return
+        elapsed_ms = int((time.monotonic() - started) * 1000) if current_task is not None else 0
+        summary = format_validation_progress(config.REPOSITORY, selected, by_id, current_task, elapsed_ms)
+        if progress_state.get("last") == summary:
+            return
+        progress_state["last"] = summary
+        on_progress(summary)
+
     if missing:
         for task in selected:
             by_id[task["id"]] = {"taskId": task["id"], "status": "not-run", "reason": "required command or runtime is unavailable", "required": task.get("required", True)}
+        report_progress()
         receipt = make_receipt(plan, run_id, started_at, by_id, run_root, missing)
         return receipt, run_root, 1
 
@@ -428,9 +458,11 @@ def execute(root: Path, plan: dict[str, Any]) -> tuple[dict[str, Any], Path, int
         failed_dependency = next((by_id.get(dependency) for dependency in task.get("dependsOn", []) if by_id.get(dependency, {}).get("status") != "passed"), None)
         if failed_dependency:
             by_id[task["id"]] = {"taskId": task["id"], "status": "blocked", "reason": "dependency did not pass", "required": True}
+            report_progress()
             continue
         if capture_candidate(root, config.INPUTS, plan["inventory"])["sourceSha256"] != plan["candidate"]["sourceSha256"]:
             by_id[task["id"]] = {"taskId": task["id"], "status": "blocked", "reason": "candidate source changed after planning", "required": True}
+            report_progress()
             source_changed = True
             break
         configured = next(item for item in config.TASKS if item["id"] == task["id"])
@@ -443,19 +475,35 @@ def execute(root: Path, plan: dict[str, Any]) -> tuple[dict[str, Any], Path, int
         executable_task = {**configured, "command": command}
         if configured["id"] == "install-test-dependencies":
             executable_task["env"] = {"PIP_NO_CACHE_DIR": "1"}
-        result = run_task(root, executable_task, run_root / (task["id"] + ".log"))
+        task_started = time.monotonic()
+        report_progress(task, task_started)
+        heartbeat_stop = threading.Event()
+
+        def heartbeat() -> None:
+            while not heartbeat_stop.wait(PROGRESS_INTERVAL_SECONDS):
+                report_progress(task, task_started)
+
+        heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+        heartbeat_thread.start()
+        try:
+            result = run_task(root, executable_task, run_root / (task["id"] + ".log"))
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join()
         result["inventory"] = [{
             "lane": lane,
             "discoveredFiles": plan["inventoryCounts"].get(lane, 0),
             "inventorySha256": plan["inventoryLaneDigests"][lane],
         } for lane in configured.get("inventory_lanes", [])]
         by_id[task["id"]] = result
+        report_progress()
         if capture_candidate(root, config.INPUTS, plan["inventory"])["sourceSha256"] != plan["candidate"]["sourceSha256"]:
             source_changed = True
             break
     for task in plan["tasks"]:
         if task["id"] not in by_id:
             by_id[task["id"]] = {"taskId": task["id"], "status": "blocked" if source_changed else "excluded", "reason": "candidate source changed during execution" if source_changed else "not selected", "required": True}
+    report_progress()
     receipt = make_receipt(plan, run_id, started_at, by_id, run_root, missing, source_changed)
     return receipt, run_root, 0 if receipt["status"] == "passed" else 1
 
@@ -529,7 +577,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     lock = acquire_lock(ROOT)
     try:
-        receipt, run_root, exit_code = execute(ROOT, plan)
+        receipt, run_root, exit_code = execute(
+            ROOT,
+            plan,
+            on_progress=lambda summary: print(summary, file=sys.stderr),
+        )
     finally:
         release_lock(lock)
     export_path = os.environ.get("VALIDATION_RECEIPT_EXPORT")

@@ -21,6 +21,12 @@ marker, so tests that reach the public internet remain deselected. The engine
 counts passed, skipped, failed, and deselected tests from pytest's summary and
 does not call an empty run successful.
 
+The engine writes a compact task summary to stderr at task start and completion,
+with a once-per-minute heartbeat during long tasks. Counts cover completed
+tasks; the active task and elapsed time are shown separately. GitHub publishes
+workflow step summaries after the step finishes, so live progress appears in
+the step log.
+
 Each run uses a new private temporary directory for its receipt and hashed
 pytest log. The candidate fingerprint includes the Git commit/tree and diff,
 untracked files, the discovered `tests/test_*.py` file hashes, and the test
