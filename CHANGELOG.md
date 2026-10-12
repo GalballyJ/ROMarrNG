@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.6] - 2026-10-12
+
+### User-facing changes
+
+#### Removed
+
+- **Packaging:** This repository no longer contains YunoHost packaging or updates the YunoHost app repository. Existing YunoHost installations will no longer receive package updates through ROMarrNG.
+
 ## [0.14.5] - 2026-10-12
 
 ### User-facing changes
