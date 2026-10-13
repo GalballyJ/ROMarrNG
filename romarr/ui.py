@@ -19,6 +19,11 @@ One file, no build step, no framework. This runs in a 512MB container beside a
 download client and a database.
 """
 
+import json
+from pathlib import Path
+
+UI_LABELS = json.loads(Path(__file__).with_name("ui-labels.json").read_text(encoding="utf-8"))
+
 CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
 
@@ -616,8 +621,18 @@ def _theme_control_html() -> str:
         f'aria-label="{name} accent"></button>'
         for value, name in ACCENTS
     )
+    language_options = ''.join(
+        f'<option value="{code}">{label}</option>'
+        for code, label in [
+            ('en', 'English'), ('es', 'Español — Spanish'), ('zh-Hans', '简体中文 — Simplified Chinese'), ('hi', 'हिन्दी — Hindi'),
+            ('de', 'Deutsch — German'), ('ja', '日本語 — Japanese'), ('fr', 'Français — French'), ('pt-BR', 'Português (Brasil) — Brazilian Portuguese'),
+            ('ar', 'العربية — Arabic'), ('ko', '한국어 — Korean'), ('zh-Hant', '繁體中文 — Traditional Chinese'), ('vi', 'Tiếng Việt — Vietnamese'), ('id', 'Bahasa Indonesia — Indonesian'),
+        ]
+    )
     return (
         '<div id="railfoot">'
+        '<label class="thm-lbl" for="interface-language" data-i18n="Interface language">Interface language</label>'
+        f'<select id="interface-language" aria-label="Interface language" style="width:100%;margin:0 0 10px;padding:7px 8px;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:7px">{language_options}</select>'
         '<div class="thm-lbl">Theme</div>'
         '<div class="thm-modes" role="group" aria-label="Colour mode">'
         '<button class="thm" type="button" data-theme-set="dark" '
@@ -662,19 +677,43 @@ NAV = [
 def _nav_html() -> str:
     out = []
     for group, items in NAV:
-        out.append(f'<div class="navgroup"><div class="navhead">{group}</div>')
+        out.append(f'<div class="navgroup"><div class="navhead" data-i18n="{group}">{group}</div>')
         for key, label, count in items:
             badge = f'<b class="ct" data-ct="{count}"></b>' if count else ""
             out.append(
                 f'<div class="nav" data-page="{key}">'
-                f'<span class="lbl">{label}</span>{badge}</div>'
+                f'<span class="lbl" data-i18n="{label}">{label}</span>{badge}</div>'
             )
         out.append("</div>")
     return "".join(out)
 
 
 JS = r"""
+const UI_LABELS=__UI_LABELS__;
 const $=s=>document.querySelector(s);
+const INTERFACE_LANGUAGE_KEY='romarrng.interface-language';
+const INTERFACE_LANGUAGES=['en','es','zh-Hans','hi','de','ja','fr','pt-BR','ar','ko','zh-Hant','vi','id'];
+const browserInterfaceLanguage=()=>{
+  for(const candidate of (navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language])){
+    const normalized=String(candidate||'').toLowerCase(), base=normalized.split(/[-_]/)[0];
+    if(base==='zh') return /(?:hant|tw|hk|mo)/.test(normalized)?'zh-Hant':'zh-Hans';
+    if(base==='pt') return 'pt-BR';
+    if(INTERFACE_LANGUAGES.includes(base)) return base;
+  }
+  return 'en';
+};
+const readInterfaceLanguage=()=>{
+  try{const value=localStorage.getItem(INTERFACE_LANGUAGE_KEY);return INTERFACE_LANGUAGES.includes(value)?value:browserInterfaceLanguage();}
+  catch(_){return browserInterfaceLanguage();}
+};
+const translateLabel=(source,language)=>UI_LABELS[source]?.[language]||source;
+const applyInterfaceLanguage=(language=readInterfaceLanguage())=>{
+  document.documentElement.lang=language;
+  document.documentElement.dir=language==='ar'?'rtl':'ltr';
+  document.querySelectorAll('[data-i18n]').forEach(el=>{el.textContent=translateLabel(el.dataset.i18n,language);});
+  const selector=$('#interface-language'); if(selector) selector.value=language;
+  const title=$('#top h1'); if(title&&title.dataset.i18n) title.textContent=translateLabel(title.dataset.i18n,language);
+};
 const j=(u,o)=>fetch(u,o).then(r=>r.json());
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -711,7 +750,7 @@ const regionalFormatField=()=>{
   const options=REGIONAL_FORMATS.map(([code,label])=>'<option value="'+esc(code)+'"'+(code===current?' selected':'')+'>'+esc(label)+'</option>').join('');
   return '<div class="field"><label for="g-regional-format">Date, time, and number format</label>'+
     '<select id="g-regional-format" aria-describedby="g-regional-format-help">'+options+'</select>'+
-    '<div id="g-regional-format-help" style="color:var(--dim);font-size:11.5px;margin-top:4px">Choose how dates and numbers are shown in this browser. Interface text remains English.</div></div>';
+    '<div id="g-regional-format-help" style="color:var(--dim);font-size:11.5px;margin-top:4px">This changes date and number formats only; it is separate from interface language.</div></div>';
 };
 const fmt=n=>Number(n??0).toLocaleString(getRegionalLocale());
 const num=n=>n===null||n===undefined?'—':fmt(n);
@@ -792,7 +831,9 @@ function go(page){
     collections:'Collections \u2014 full sets and 1G1R',
     getstarted:'Get Started',
     hub:'ROM Hub — Plugins'};
-  $('#top h1').textContent=titles[page]||'ROMarr';
+  const title=$('#top h1');
+  title.dataset.i18n=titles[page]||'ROMarr';
+  title.textContent=translateLabel(title.dataset.i18n,readInterfaceLanguage());
   $('#search').classList.toggle('hide', !['library','add'].includes(page));
   (RENDER[page]||RENDER.library)();
 }
@@ -4140,6 +4181,15 @@ async function refreshCounts(){
 }
 (async()=>{
   document.querySelectorAll('.nav').forEach(n=>n.onclick=()=>go(n.dataset.page));
+  const languageSelect=$('#interface-language');
+  if(languageSelect){
+    languageSelect.addEventListener('change',()=>{
+      const language=languageSelect.value;
+      try{localStorage.setItem(INTERFACE_LANGUAGE_KEY,language);}catch(_){}
+      applyInterfaceLanguage(language);
+    });
+  }
+  applyInterfaceLanguage();
   bindTheme();
   let searchTimer=null;
   $('#search').oninput=()=>{const p=location.hash.slice(1)||'library';
@@ -4154,7 +4204,7 @@ async function refreshCounts(){
   go(location.hash.slice(1)||'library');
   refreshCounts(); setInterval(refreshCounts,15000);
 })();
-"""
+""".replace("__UI_LABELS__", json.dumps(UI_LABELS, ensure_ascii=False))
 
 
 def page() -> str:
@@ -4165,7 +4215,7 @@ def page() -> str:
 <div id="navwrap">{_nav_html()}</div>
 {_theme_control_html()}</nav>
 <div id="main">
-  <div id="top"><h1>Games</h1><input id="search" placeholder="Filter…" autocomplete="off"></div>
+  <div id="top"><h1 data-i18n="Games">Games</h1><input id="search" placeholder="Filter…" autocomplete="off"></div>
   <div class="page" id="page"></div>
 </div>
 <script>{JS}</script></body></html>"""
