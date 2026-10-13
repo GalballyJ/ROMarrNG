@@ -288,6 +288,7 @@ def test_public_workflow_uses_hosted_runners_for_contributor_controlled_code():
 
     assert "prepare-private-runner-temp.sh" in test_job
     assert "PRIVATE_RUNNER_TEMP_PREFIX: romarr" in test_job
+    assert "persist-credentials: false" in test_job
     helper = (ROOT / "scripts" / "prepare-private-runner-temp.sh").read_text(
         encoding="utf-8"
     )

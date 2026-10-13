@@ -53,7 +53,7 @@ def test_only_receipt_verified_failed_task_logs_are_staged(tmp_path):
             },
         ],
     )
-    destination = private_root / "romarr-validation-failed-task-logs"
+    destination = private_root / "romarr-validation" / "failed-task-logs"
 
     staged = stage_failed_pytest_logs(receipt, private_root, destination)
 
@@ -89,7 +89,7 @@ def test_failed_task_log_digest_must_match_receipt(tmp_path):
         stage_failed_pytest_logs(
             receipt,
             private_root,
-            private_root / "romarr-validation-failed-task-logs",
+            private_root / "romarr-validation" / "failed-task-logs",
         )
 
 
@@ -104,7 +104,7 @@ def test_evidence_directory_must_stay_inside_private_runner_storage(tmp_path):
         stage_failed_pytest_logs(
             receipt,
             private_root,
-            private_root / "romarr-validation-failed-task-logs",
+            private_root / "romarr-validation" / "failed-task-logs",
         )
 
 
@@ -118,10 +118,11 @@ def test_workflow_artifact_is_limited_to_receipt_and_failed_pytest_logs():
     )[0]
 
     assert "python3.13 -m scripts.validation_engine.retain_failed_pytest_logs" in test_job
-    assert "romarr-validation-failed-task-logs/manifest.json" in test_job
-    assert "romarr-validation-failed-task-logs/*.log" in test_job
+    assert "romarr-validation/pytest.json" in test_job
+    assert "romarr-validation/failed-task-logs/manifest.json" in test_job
+    assert "romarr-validation/failed-task-logs/*.log" in test_job
     assert (
-        "path: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarrng-validation"
-        not in test_job
+        "romarrng-validation-receipt-${{ github.run_id }}-${{ github.run_attempt }}"
+        in test_job
     )
-    assert "romarrng-validation-evidence-${{ github.run_id }}-${{ github.run_attempt }}" in test_job
+    assert "romarr-validation/**" not in test_job

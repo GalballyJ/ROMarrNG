@@ -31,7 +31,7 @@ def stage_failed_pytest_logs(
     if receipt_path.is_symlink():
         raise ValueError("The validation receipt must not be a symlink.")
     receipt = receipt_path.resolve(strict=True)
-    expected_destination = private / "romarr-validation-failed-task-logs"
+    expected_destination = private / "romarr-validation" / "failed-task-logs"
     if not _contained(receipt, private) or receipt == private:
         raise ValueError("The validation receipt is outside private temporary storage.")
     if destination.resolve(strict=False) != expected_destination:
@@ -128,7 +128,7 @@ def main() -> int:
     try:
         private_root = Path(os.environ["PRIVATE_RUNNER_TEMP"])
         receipt_path = Path(os.environ["VALIDATION_RECEIPT_EXPORT"])
-        destination = private_root / "romarr-validation-failed-task-logs"
+        destination = private_root / "romarr-validation" / "failed-task-logs"
         manifest = stage_failed_pytest_logs(receipt_path, private_root, destination)
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         print(f"Unable to stage failed pytest task logs: {error}", file=sys.stderr)
