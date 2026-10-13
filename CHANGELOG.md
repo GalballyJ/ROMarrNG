@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.10] - 2026-10-13
+
+### User-facing changes
+
+#### Security
+
+- **Validation:** ROMarrNG's packaged acquisition proof now rejects TLS 1.0 and 1.1 on its local HTTPS fixture, requiring TLS 1.2 or newer. This improves security validation without changing the application's runtime network behavior.
+
 ## [0.14.9] - 2026-10-13
 
 ### User-facing changes
