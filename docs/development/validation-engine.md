@@ -29,10 +29,9 @@ GitHub Actions remains responsible for receipt-backed hosted validation.
 
 In CI, `--plan` discovers files and required commands without installing
 packages or running pytest. Pull requests, version-tag pushes, and manual runs
-targeting refs other than `main` use GitHub-hosted Ubuntu. Pushes to
-same-repository branch pushes and manual runs targeting `main` use the
-repository's `kspls0`-labelled Linux runner. Pull requests, version-tag pushes,
-and manual runs on other refs use GitHub-hosted runners. The hosted jobs
+targeting refs other than `main` use GitHub-hosted Ubuntu. Same-repository
+branch pushes and manual runs targeting `main` use whichever repository-local
+Linux runner is available (`kspld0` or `kspls0`). The hosted jobs
 use `setup-python`; the local job provisions Python 3.13 with a disposable uv
 virtualenv under the runner's private temporary directory. Both paths use the
 same validation engine, which installs repository requirements and pytest in

@@ -23,10 +23,23 @@ unsafe_parent="$scratch_root/unsafe-parent"
 unsafe_temp="$unsafe_parent/runner-temp"
 outside_env="$scratch_root/outside-env"
 outside_output="$scratch_root/outside-output"
+outside_private_temp="$scratch_root/outside-private-temp"
+
+remove_private_temp_if_contained() {
+  [[ -n "$private_temp" && -d "$private_temp" && ! -L "$private_temp" \
+    && -d "$runner_temp" && ! -L "$runner_temp" ]] || return 0
+
+  local private_temp_real runner_temp_real
+  private_temp_real="$(cd -- "$private_temp" 2>/dev/null && pwd -P)" || return 0
+  runner_temp_real="$(cd -- "$runner_temp" 2>/dev/null && pwd -P)" || return 0
+  [[ "$private_temp_real" == "$runner_temp_real/"* ]] || return 0
+  rmdir -- "$private_temp_real" 2>/dev/null || true
+}
 
 cleanup() {
-  [[ -n "$private_temp" && -d "$private_temp" ]] && rmdir -- "$private_temp" 2>/dev/null || true
   [[ -L "$unsafe_link" ]] && unlink -- "$unsafe_link" 2>/dev/null || true
+  [[ -d "$outside_private_temp" && ! -L "$outside_private_temp" ]] \
+    && rmdir -- "$outside_private_temp" 2>/dev/null || true
   [[ -f "$outside_env" ]] && unlink -- "$outside_env" 2>/dev/null || true
   [[ -f "$outside_output" ]] && unlink -- "$outside_output" 2>/dev/null || true
   [[ -f "$github_env" ]] && unlink -- "$github_env" 2>/dev/null || true
@@ -36,7 +49,7 @@ cleanup() {
   [[ -f "$unsafe_temp/github-output" ]] && unlink -- "$unsafe_temp/github-output" 2>/dev/null || true
   [[ -d "$unsafe_temp" ]] && rmdir -- "$unsafe_temp" 2>/dev/null || true
   [[ -d "$unsafe_parent" ]] && rmdir -- "$unsafe_parent" 2>/dev/null || true
-  [[ -d "$private_temp" ]] && rmdir -- "$private_temp" 2>/dev/null || true
+  remove_private_temp_if_contained
   [[ -d "$runner_temp" ]] && rmdir -- "$runner_temp" 2>/dev/null || true
   [[ -d "$scratch_root" ]] && rmdir -- "$scratch_root" 2>/dev/null || true
 }
@@ -45,6 +58,7 @@ trap cleanup EXIT
 mkdir -m 700 -- "$runner_temp"
 chmod 775 -- "$runner_temp"
 mkdir -m 700 -- "$command_file_dir"
+chmod 777 -- "$command_file_dir"
 : > "$github_env"
 : > "$github_output"
 chmod 600 -- "$github_env" "$github_output"
@@ -56,6 +70,14 @@ GITHUB_OUTPUT="$github_output" \
 bash "$helper"
 
 private_temp="$(sed -n 's/^path=//p' "$github_output")"
+helper_private_temp="$private_temp"
+mkdir -m 700 -- "$outside_private_temp"
+private_temp="$outside_private_temp"
+remove_private_temp_if_contained
+[[ -d "$outside_private_temp" ]] \
+  || { printf 'Cleanup removed a directory outside RUNNER_TEMP.\n' >&2; exit 1; }
+rmdir -- "$outside_private_temp"
+private_temp="$helper_private_temp"
 [[ -n "$private_temp" && -d "$private_temp" && ! -L "$private_temp" ]] \
   || { printf 'Private job directory was not exported safely.\n' >&2; exit 1; }
 [[ "$private_temp" == "$runner_temp"/* ]] \
@@ -66,6 +88,8 @@ private_temp="$(sed -n 's/^path=//p' "$github_output")"
   || { printf 'Private job directory is not mode 0700.\n' >&2; exit 1; }
 [[ "$(stat -c '%a' -- "$github_env")" == 600 && "$(stat -c '%a' -- "$github_output")" == 600 ]] \
   || { printf 'GitHub command files are not private.\n' >&2; exit 1; }
+[[ "$(stat -c '%a' -- "$command_file_dir")" == 700 ]] \
+  || { printf 'GitHub command-file directory is not private.\n' >&2; exit 1; }
 for name in PRIVATE_RUNNER_TEMP TMPDIR TMP TEMP; do
   grep -Fxq "$name=$private_temp" "$github_env" \
     || { printf '%s was not pointed at the private job directory.\n' "$name" >&2; exit 1; }
