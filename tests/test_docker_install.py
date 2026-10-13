@@ -271,7 +271,7 @@ def test_the_install_guide_exists_and_the_readme_sends_people_to_it():
     assert "docs/INSTALL.md" in README.read_text(encoding="utf-8"), (
         "the full install guide is unreachable from the README")
 
-def test_only_main_uses_local_validation_and_other_branch_pushes_stay_hosted():
+def test_trusted_branch_pushes_use_the_private_local_validation_runner():
     workflow = (ROOT / ".github" / "workflows" / "docker.yml").read_text(
         encoding="utf-8"
     )
@@ -281,9 +281,8 @@ def test_only_main_uses_local_validation_and_other_branch_pushes_stay_hosted():
     test_job = workflow.split("  test:\n", 1)[1].split(
         "\n  validation-environment-portability:", 1
     )[0]
-    assert "github.ref == 'refs/heads/main'" in test_job
-    assert "github.event_name == 'push' || github.event_name == 'workflow_dispatch'" in test_job
-    assert "startsWith(github.ref, 'refs/heads/')" not in test_job
+    assert "github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')" in test_job
+    assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in test_job
     assert "fromJSON('[\"self-hosted\",\"Linux\",\"X64\",\"host\",\"kspls0\"]')" in test_job
     assert "|| fromJSON('[\"ubuntu-latest\"]')" in test_job
     assert "prepare-private-runner-temp.sh" in test_job

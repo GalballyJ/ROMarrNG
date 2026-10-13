@@ -1054,8 +1054,9 @@ The supporting documents are the [complete issue/PR audit](docs/UPSTREAM_AUDIT.m
 An honest map of what is solid, what is thin, and where a contribution
 lands hardest. CI runs the full suite on pull requests, same-repository branch
 pushes, and version tags. Only pushes to main and manual runs targeting
-main use the `kspls0`-labelled local Linux runner; other branches, pull
-requests, and version tags use GitHub-hosted runners. PR image builds use
+same-repository branches and manual runs targeting main use the `kspls0`-labelled
+local Linux runner; pull requests, version tags, and manual runs on other refs
+use GitHub-hosted runners. PR image builds use
 read-only permissions; only main and version-tag workflows, plus manual runs on
 main, can publish images. In the
 2026-10-12 local full-suite run, 2,319 tests passed, 3 were skipped, and 1
