@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.9] - 2026-10-13
+
+### User-facing changes
+
+#### Added
+
+- **Seerrng:** Files delivered to SeerrNG now say whether they matched your loaded DATs, so SeerrNG can show a verified badge on ROM requests. The SeerrNG handshake reports this as assetDatVerification.
+
 ## [0.14.8] - 2026-10-13
 
 ### User-facing changes
