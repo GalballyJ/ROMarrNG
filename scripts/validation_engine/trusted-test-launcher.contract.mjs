@@ -27,7 +27,7 @@ const launcher = fileURLToPath(
     import.meta.url
   )
 );
-for (const hostPath of ['/etc', '/opt', '/srv', '/usr/local'])
+for (const hostPath of ['/etc', '/srv'])
   assert.ok(
     HOST_PATHS_TO_HIDE.includes(hostPath),
     'the sandbox must hide host path ' + hostPath
@@ -128,6 +128,8 @@ test(
     );
     writeFileSync(path.join(source, 'auth.json'), '{"token":"private"}\n');
     writeFileSync(path.join(source, 'token.json'), '{"token":"private"}\n');
+    writeFileSync(path.join(source, 'auth.py'), 'AUTH_MODULE = True\n');
+    writeFileSync(path.join(source, 'credentials.py'), 'CREDENTIALS_MODULE = True\n');
     mkdirSync(path.join(source, 'node_modules'), { recursive: true });
     writeFileSync(
       path.join(source, 'node_modules/marker.txt'),
@@ -159,6 +161,8 @@ assert.equal(existsSync('/mnt/workspace/config.json'), true);
 assert.equal(existsSync('/mnt/workspace/nested/config/operator.json'), false);
 assert.equal(existsSync('/mnt/workspace/auth.json'), false);
 assert.equal(existsSync('/mnt/workspace/token.json'), false);
+assert.equal(existsSync('/mnt/workspace/auth.py'), true);
+assert.equal(existsSync('/mnt/workspace/credentials.py'), true);
 assert.equal(existsSync('/etc/os-release'), false);
 const originalCheckout = ${JSON.stringify(source)};
 assert.throws(() => readFileSync(path.join(originalCheckout, 'auth.json')), { code: 'ENOENT' });
@@ -348,6 +352,15 @@ test(
 test('sandbox masks standard and checkout host roots', () => {
   assert.ok(HOST_PATHS_TO_HIDE.includes('/etc'));
   assert.ok(hostPathsToHide('/projects/ROMarrNG').includes('/projects'));
+  const nestedCheckout = hostPathsToHide('/projects/team/work/ROMarrNG');
+  assert.ok(nestedCheckout.includes('/projects'));
+  assert.ok(!nestedCheckout.includes('/projects/team'));
+  const localCheckout = hostPathsToHide(
+    '/usr/local/share/workspaces/ROMarrNG'
+  );
+  assert.ok(localCheckout.includes('/usr/local/share/workspaces'));
+  assert.ok(!localCheckout.includes('/usr/local'));
+  assert.ok(!localCheckout.includes('/opt'));
   assert.ok(hostPathsToHide('/ROMarrNG').includes('/ROMarrNG'));
   assert.equal(
     hostPathsToHide('/home/keith/ROMarrNG').includes('/home/keith'),

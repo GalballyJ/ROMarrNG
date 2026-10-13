@@ -25,7 +25,7 @@ const GUEST_RUN = '/mnt/run-data';
 const GUEST_MARKER = '/run/validation-engine-sandbox';
 const GIT = ['/usr/bin/git', '/bin/git'].find(existsSync);
 const sensitiveName =
-  /^(?:\.env(?:$|\.(?!example$)[^/]+)|\.ssh|\.aws|\.gnupg|id_(?:rsa|ed25519)|auth(?:entication)?(?:\.[^/]+)?|tokens?(?:\.[^/]+)?|credentials?(?:\.[^/]+)?|secrets?(?:\.[^/]+)?|\.git-credentials|\.npmrc|\.pypirc|\.netrc|[^/]+\.(?:pem|key))$/iu;
+  /^(?:\.env(?:$|\.(?!example$)[^/]+)|\.ssh|\.aws|\.gnupg|id_(?:rsa|ed25519)|(?:auth(?:entication)?|tokens?|credentials?|secrets?)(?:\.(?:json|ya?ml|toml|ini|conf|cfg|env|txt))?|\.git-credentials|\.npmrc|\.pypirc|\.netrc|[^/]+\.(?:pem|key))$/iu;
 function isSensitive(relativePath, tracked) {
   const segments = relativePath.split('/');
   if (segments.includes('.git') || segments.includes('node_modules'))
