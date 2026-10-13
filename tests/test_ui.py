@@ -1,13 +1,49 @@
 """The rendered page, as a browser reads it rather than as the source spells it."""
 
 import re
+from html.parser import HTMLParser
 
 from romarr.ui import page
+
+
+class _InlineScriptParser(HTMLParser):
+    """Collect script contents with the browser-tolerant HTML parser."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.scripts: list[str] = []
+        self._current_script: list[str] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "script":
+            self._current_script = []
+
+    def handle_data(self, data):
+        if self._current_script is not None:
+            self._current_script.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "script" and self._current_script is not None:
+            self.scripts.append("".join(self._current_script))
+            self._current_script = None
+
+
+def _inline_scripts(html: str) -> list[str]:
+    parser = _InlineScriptParser()
+    parser.feed(html)
+    parser.close()
+    return parser.scripts
 
 
 def _text(html: str) -> str:
     """Tags stripped -- what a reader actually sees."""
     return re.sub(r"<[^>]+>", "", html)
+
+
+def test_inline_script_extraction_handles_browser_tolerated_end_tags():
+    assert _inline_scripts("<SCRIPT>inline</sCrIpT >") == ["inline"]
+    assert _inline_scripts("<script>inline</script\t\n bar>") == ["inline"]
+    assert _inline_scripts("<scripture>not inline</scripture>") == []
 
 
 def test_the_brand_reads_romarr():
@@ -70,10 +106,7 @@ def test_interface_language_choice_survives_storage_failure_for_current_tab():
     if not node:
         pytest.skip("Node.js is required to exercise browser language preferences")
 
-    script_tags = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.S | re.IGNORECASE)
-    assert script_tags.findall("<SCRIPT>inline</sCrIpT >") == ["inline"]
-    assert script_tags.findall("<scripture>not inline</scripture>") == []
-    scripts = script_tags.findall(page())
+    scripts = _inline_scripts(page())
     script = next(x for x in scripts if "const INTERFACE_LANGUAGE_KEY" in x)
     language_helpers = script[
         script.index("const $=s=>document.querySelector(s);") : script.index("const j=")
@@ -202,7 +235,7 @@ def test_every_rendered_inline_script_parses_as_javascript():
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js is required to syntax-check rendered JavaScript")
-    scripts = re.findall(r"<script[^>]*>(.*?)</script>", page(), re.S)
+    scripts = _inline_scripts(page())
     assert scripts
     for script in scripts:
         checked = subprocess.run([node, "--check"], input=script, text=True,
@@ -222,7 +255,7 @@ def test_browser_regional_formatting_helpers_and_settings_markup():
         pytest.skip("Node.js is required to exercise browser formatting helpers")
 
     html = page()
-    scripts = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)
+    scripts = _inline_scripts(html)
     script = next(x for x in scripts if "const REGIONAL_FORMAT_KEY" in x)
     start = script.index("const esc=")
     end = script.index("\nlet PLATFORMS=", start)
