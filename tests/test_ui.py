@@ -107,9 +107,13 @@ applyInterfaceLanguage();
 const storageFailureChoice = readInterfaceLanguage();
 storedLanguage = "fr";
 syncLanguage({key: INTERFACE_LANGUAGE_KEY, newValue: storedLanguage});
+const crossTabLanguage = readInterfaceLanguage();
+storedLanguage = null;
+syncLanguage({key: null, newValue: null});
 console.log(JSON.stringify({
   storageFailureChoice,
-  crossTabLanguage: readInterfaceLanguage(),
+  crossTabLanguage,
+  clearFallback: readInterfaceLanguage(),
   selected: selector.value
 }));
 """
@@ -118,7 +122,8 @@ console.log(JSON.stringify({
     )
     assert result.returncode == 0, result.stderr
     assert '"storageFailureChoice":"de"' in result.stdout
-    assert '"crossTabLanguage":"fr","selected":"fr"' in result.stdout
+    assert '"crossTabLanguage":"fr"' in result.stdout
+    assert '"clearFallback":"en","selected":"en"' in result.stdout
 
 
 def test_the_libraries_page_is_in_the_nav_and_rendered():

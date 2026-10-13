@@ -4226,14 +4226,15 @@ async function refreshCounts(){
   if(languageSelect){
     languageSelect.addEventListener('change',()=>{
       const language=languageSelect.value;
-      activeInterfaceLanguage=language;
-      try{localStorage.setItem(INTERFACE_LANGUAGE_KEY,language);}catch(_){}
+      try{localStorage.setItem(INTERFACE_LANGUAGE_KEY,language);activeInterfaceLanguage=null;}
+      catch(_){activeInterfaceLanguage=language;}
       applyInterfaceLanguage(language);
     });
   }
   window.addEventListener('storage',event=>{
-    if(event.key!==INTERFACE_LANGUAGE_KEY)return;
-    activeInterfaceLanguage=INTERFACE_LANGUAGES.includes(event.newValue)?event.newValue:null;
+    if(event.key!==INTERFACE_LANGUAGE_KEY&&event.key!==null)return;
+    activeInterfaceLanguage=event.key===INTERFACE_LANGUAGE_KEY
+      &&INTERFACE_LANGUAGES.includes(event.newValue)?event.newValue:null;
     applyInterfaceLanguage();
   });
   applyInterfaceLanguage();
