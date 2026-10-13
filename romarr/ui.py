@@ -693,6 +693,7 @@ const UI_LABELS=__UI_LABELS__;
 const $=s=>document.querySelector(s);
 const INTERFACE_LANGUAGE_KEY='romarrng.interface-language';
 const INTERFACE_LANGUAGES=['en','es','zh-Hans','hi','de','ja','fr','pt-BR','ko','zh-Hant','vi','id'];
+let activeInterfaceLanguage=null;
 const browserInterfaceLanguage=()=>{
   for(const candidate of (navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language])){
     const normalized=String(candidate||'').toLowerCase(), base=normalized.split(/[-_]/)[0];
@@ -703,6 +704,7 @@ const browserInterfaceLanguage=()=>{
   return 'en';
 };
 const readInterfaceLanguage=()=>{
+  if(INTERFACE_LANGUAGES.includes(activeInterfaceLanguage)) return activeInterfaceLanguage;
   try{const value=localStorage.getItem(INTERFACE_LANGUAGE_KEY);return INTERFACE_LANGUAGES.includes(value)?value:browserInterfaceLanguage();}
   catch(_){return browserInterfaceLanguage();}
 };
@@ -4224,6 +4226,7 @@ async function refreshCounts(){
   if(languageSelect){
     languageSelect.addEventListener('change',()=>{
       const language=languageSelect.value;
+      activeInterfaceLanguage=language;
       try{localStorage.setItem(INTERFACE_LANGUAGE_KEY,language);}catch(_){}
       applyInterfaceLanguage(language);
     });

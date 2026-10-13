@@ -5,4 +5,4 @@ area: ui
 action: none
 breaking: false
 ---
-ROMarr lets each browser choose from eleven translated interface languages, with English fallback. Navigation and page titles use translated labels, and the Library, Request a game form, and Interactive Search also translate their main filters, actions, and grab statuses. Arabic interface support remains deferred until right-to-left layout and core workflows have been reviewed; Arabic is available as a regional-format preference.
+ROMarr lets each browser choose from eleven interface languages, with English fallback. Navigation, page titles, Library filters, request workflows, and Interactive Search use translated labels, actions, and grab statuses. Arabic interface support remains deferred until right-to-left layout and core workflows are reviewed; Arabic is available as a regional-format preference.

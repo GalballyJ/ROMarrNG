@@ -61,6 +61,54 @@ def test_library_and_search_labels_cover_selectable_interface_languages():
     assert "if(!game){toast(translateLabel('Enter a game name',readInterfaceLanguage()));return;}" in html
 
 
+def test_interface_language_choice_survives_storage_failure_for_current_tab():
+    import shutil
+    import subprocess
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required to exercise browser language preferences")
+
+    scripts = re.findall(r"<script[^>]*>(.*?)</script>", page(), re.S)
+    script = next(x for x in scripts if "const INTERFACE_LANGUAGE_KEY" in x)
+    language_helpers = script[
+        script.index("const $=s=>document.querySelector(s);") : script.index("const j=")
+    ]
+    change_handler = script[
+        script.index("const languageSelect=$('#interface-language');") : script.index(
+            "  bindTheme();"
+        )
+    ]
+    harness = r"""
+let changeLanguage;
+const selector = {
+  value: "en",
+  addEventListener: (_name, handler) => { changeLanguage = handler; }
+};
+globalThis.navigator = {languages: ["en"], language: "en"};
+globalThis.localStorage = {
+  getItem: () => null,
+  setItem: () => { throw new Error("storage unavailable"); }
+};
+globalThis.document = {
+  documentElement: {},
+  querySelector: name => name === "#interface-language" ? selector : null,
+  querySelectorAll: () => []
+};
+""" + language_helpers + change_handler + r"""
+selector.value = "de";
+changeLanguage();
+applyInterfaceLanguage();
+console.log(JSON.stringify({language: readInterfaceLanguage(), selected: selector.value}));
+"""
+    result = subprocess.run(
+        [node, "-e", harness], text=True, capture_output=True, timeout=15
+    )
+    assert result.returncode == 0, result.stderr
+    assert '"language":"de","selected":"de"' in result.stdout
+
+
 def test_the_libraries_page_is_in_the_nav_and_rendered():
     """A feature configured only by hand-editing settings.json is not one most
     people can use."""
