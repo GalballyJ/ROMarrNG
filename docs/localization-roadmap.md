@@ -46,4 +46,4 @@ The rail footer now offers a browser-local interface-language selector for eleve
 
 ## Added in this continuation
 
-Core shell CSS now uses logical positioning and text alignment as groundwork for future RTL support. Regional-format help uses the existing label catalog, and a chosen regional format remains active in the current tab if browser storage is unavailable. Arabic interface translation remains deferred until the complete RTL acceptance review is done.
+Core shell CSS now uses logical positioning and text alignment as groundwork for RTL support. Regional-format help uses the existing label catalog, and a chosen regional format remains active in the current tab if browser storage is unavailable. The Library filters and empty states, Request a game form, and Interactive Search results now translate their core labels and grab states across the twelve first-wave catalogs. Game titles, platform names, release names, indexer data, and paths remain data; longer help paragraphs and free-form server errors remain English. Arabic is available on translated labels with local RTL metadata; complete RTL workflow review remains outstanding.

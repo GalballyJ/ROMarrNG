@@ -5,4 +5,4 @@ area: ui
 action: none
 breaking: false
 ---
-ROMarr now offers a browser-local interface language. Navigation and page titles use translated labels in eleven locales, with English fallback for screens that do not yet have catalog coverage. Arabic interface support remains deferred until the complete right-to-left layout and workflow review is finished.
+ROMarr lets each browser choose a language. Navigation and page titles use translated labels in twelve locales with English fallback. The Library, Request a game form, and Interactive Search also translate their main filters, actions, and grab statuses. Arabic applies to translated labels only; full right-to-left layout and workflow review remains outstanding.

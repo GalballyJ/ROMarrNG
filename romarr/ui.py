@@ -717,6 +717,12 @@ const applyInterfaceLanguage=(language=readInterfaceLanguage())=>{
   document.documentElement.lang='en';
   document.documentElement.dir='ltr';
   document.querySelectorAll('[data-i18n]').forEach(el=>applyTranslatedLabel(el,language));
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
+    const source=el.dataset.i18nPlaceholder, translated=UI_LABELS[source]?.[language];
+    el.placeholder=translateLabel(source,language);
+    el.lang=translated?language:'en';
+    el.dir=translated&&language==='ar'?'rtl':'ltr';
+  });
   const selector=$('#interface-language'); if(selector) selector.value=language;
 };
 const j=(u,o)=>fetch(u,o).then(r=>r.json());
@@ -1121,7 +1127,7 @@ RENDER.library=async()=>{
   const sel=(key,label,list,fmt)=>{
     if(!list||!list.length) return '';
     return `<select data-lf="${key}" style="padding:4px 8px;font-size:12px">
-      <option value="">${label}</option>
+      <option value="" data-i18n="${esc(label)}">${esc(translateLabel(label,readInterfaceLanguage()))}</option>
       ${list.map(x=>`<option value="${esc(x.value)}"${LIB[key]===x.value?' selected':''}
         >${esc(fmt?fmt(x.value):x.value)} (${num(x.count)})</option>`).join('')}
     </select>`;
@@ -1136,9 +1142,9 @@ RENDER.library=async()=>{
   const srcRows=(f.sources||[]).filter(x=>x.value!=='local');
   const banner=`<div class="card" style="margin-bottom:12px">
     <div class="st">
-      <div><b>${num(T.on_disk)}</b><span>On disk here</span></div>
-      <div><b>${num(T.catalogued)}</b><span>Catalogued, streams</span></div>
-      <div><b>${num(T.total)}</b><span>Total known</span></div>
+      <div><b>${num(T.on_disk)}</b><span data-i18n="On disk here">On disk here</span></div>
+      <div><b>${num(T.catalogued)}</b><span data-i18n="Catalogued, streams">Catalogued, streams</span></div>
+      <div><b>${num(T.total)}</b><span data-i18n="Total known">Total known</span></div>
     </div>
     ${srcRows.length?`<p class="help" style="margin:8px 0 0">
       Catalogued entries by source:
@@ -1156,7 +1162,7 @@ RENDER.library=async()=>{
   </div>`;
   const head=banner+`<div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
       <button class="btn ${LIB.platform?'ghost':''}" data-plat=""
-        style="padding:4px 10px;font-size:12px">All
+        style="padding:4px 10px;font-size:12px"><span data-i18n="All">All</span>
         <span style="opacity:.7">${fmt(d.grand_total)}</span></button>${chips}</div>
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;align-items:center">
       ${sel('genre','Any genre',f.genres)}
@@ -1167,13 +1173,13 @@ RENDER.library=async()=>{
       ${(f.sources||[]).length>1?sel('source','Any source',f.sources,
         v=>SOURCE_LABEL[v]||v):''}
       <select data-lf="sort" style="padding:4px 8px;font-size:12px">
-        <option value=""${LIB.sort?'':' selected'}>Platform, then name</option>
-        <option value="name"${LIB.sort==='name'?' selected':''}>Name A–Z</option>
-        <option value="rating"${LIB.sort==='rating'?' selected':''}>Top rated</option>
-        <option value="year"${LIB.sort==='year'?' selected':''}>Newest first</option>
+        <option value="" data-i18n="Platform, then name"${LIB.sort?'':' selected'}>Platform, then name</option>
+        <option value="name" data-i18n="Name A–Z"${LIB.sort==='name'?' selected':''}>Name A–Z</option>
+        <option value="rating" data-i18n="Top rated"${LIB.sort==='rating'?' selected':''}>Top rated</option>
+        <option value="year" data-i18n="Newest first"${LIB.sort==='year'?' selected':''}>Newest first</option>
       </select>
       ${(LIB.genre||LIB.region||LIB.decade||LIB.origin||LIB.source||LIB.sort)
-        ?'<button class="btn ghost" id="lf-clear" style="padding:4px 10px;font-size:12px">Clear filters</button>':''}
+        ?'<button class="btn ghost" id="lf-clear" data-i18n="Clear filters" style="padding:4px 10px;font-size:12px">Clear filters</button>':''}
       ${(f.genres||[]).length?`<span class="help" style="margin:0;font-size:11.5px">
         genre/year known for ${fmt(f.identified)} of ${fmt(d.grand_total)} (${fmt(coverage)}%) —
         run a metadata scan in your library server to raise it</span>`:''}
@@ -1187,8 +1193,8 @@ RENDER.library=async()=>{
 
   if(!items.length){
     p.innerHTML=head+`<div class="empty">
-      ${q||LIB.platform?'No game matches that.':'No games returned by the library.'}</div>`;
-    bindLibraryChips(p); return;
+      ${q||LIB.platform?'<span data-i18n="No game matches that.">No game matches that.</span>':'<span data-i18n="No games returned by the library.">No games returned by the library.</span>'}</div>`;
+    applyInterfaceLanguage(); bindLibraryChips(p); return;
   }
   // The shelf: status, rating and notes set by the operator, overlaid on the
   // grid. One fetch for the whole page -- the metadata is tiny.
@@ -1211,9 +1217,10 @@ RENDER.library=async()=>{
     <div class="pf">${esc(g.platform||'')}</div>${mark(g)}</div>`).join('')}</div>`;
   const more=LIB.offset+items.length<d.total
     ?`<div class="row" style="justify-content:center;margin:16px 0">
-       <button class="btn" id="lib-more">Show more
+       <button class="btn" id="lib-more"><span data-i18n="Show more">Show more</span>
          (${fmt(d.total-LIB.offset-items.length)} left)</button></div>`:'';
   p.innerHTML=head+grid+more;
+  applyInterfaceLanguage();
   bindLibraryChips(p);
   const moreBtn=p.querySelector('#lib-more');
   if(moreBtn) moreBtn.onclick=()=>{LIB.limit+=240;go('library');};
@@ -1277,54 +1284,57 @@ function shelfEditor(g, meta){
 
 RENDER.add=async()=>{
   $('#page').innerHTML=`<div class="card">
-    <h3>Request a game</h3>
+    <h3 data-i18n="Request a game">Request a game</h3>
     <p class="help">ROMarr searches your indexers, picks the healthiest release
       for the platform, hands it to the download client and files the ROM into RomM.</p>
     <div class="row">
-      <div class="field" style="flex:1;margin:0"><label>Game</label>
+      <div class="field" style="flex:1;margin:0"><label data-i18n="Game">Game</label>
         <input type="text" id="g-name" placeholder="Super Mario World"></div>
-      <div class="field" style="width:230px;margin:0"><label>Platform</label>
+      <div class="field" style="width:230px;margin:0"><label data-i18n="Platform">Platform</label>
         <select id="g-plat">${PLATFORMS.map(p=>
           `<option value="${esc(p.slug)}">${esc(p.name)}</option>`).join('')}</select></div>
-      <button class="btn" id="g-go" style="margin-top:20px">Search &amp; Grab</button>
+      <button class="btn" id="g-go" data-i18n="Search & Grab" style="margin-top:20px">Search &amp; Grab</button>
     </div>
     <div id="g-out" style="margin-top:16px"></div></div>`;
+  applyInterfaceLanguage();
   $('#g-go').onclick=async()=>{
     const game=$('#g-name').value.trim(), platform=$('#g-plat').value;
-    if(!game){toast('Enter a game name');return;}
-    $('#g-out').innerHTML='<div class="empty">Searching indexers…</div>';
+    if(!game){toast(translateLabel('Enter a game name',readInterfaceLanguage()));return;}
+    $('#g-out').innerHTML='<div class="empty" data-i18n="Searching indexers…">Searching indexers…</div>'; applyInterfaceLanguage();
     const r=await j('/api/request',{method:'POST',
       headers:{'content-type':'application/json'},
       body:JSON.stringify({game,platform})});
     $('#g-out').innerHTML=r.ok
-      ? `<div class="card" style="margin:0"><h3>Grabbed</h3>
+      ? `<div class="card" style="margin:0"><h3 data-i18n="Grabbed">Grabbed</h3>
          <p class="help">${esc(r.release)} — ${num(r.seeders)} seeders</p></div>`
-      : `<div class="card" style="margin:0"><h3>Not grabbed</h3>
+       : `<div class="card" style="margin:0"><h3 data-i18n="Not grabbed">Not grabbed</h3>
          <p class="help">${esc(r.error||'no usable release')}</p></div>`;
+    applyInterfaceLanguage();
     refreshCounts();
   };
 };
 
 RENDER.search=async()=>{
   $('#page').innerHTML=`<div class="card">
-    <h3>Interactive search</h3>
+    <h3 data-i18n="Interactive search">Interactive search</h3>
     <p class="help">Every release your indexers returned, scored, with the
       reasoning shown &mdash; and a Grab button, so you can overrule the ranking
       when you disagree with it. This is the page to reach for when a request
       took the wrong release: the reason it outranked the one you wanted is
       written next to it.</p>
     <div class="row">
-      <div class="field" style="flex:1;margin:0"><label>Game</label>
+      <div class="field" style="flex:1;margin:0"><label data-i18n="Game">Game</label>
         <input type="text" id="s-name" placeholder="Phantasy Star IV"></div>
-      <div class="field" style="width:230px;margin:0"><label>Platform</label>
-        <select id="s-plat"><option value="">Any platform</option>${PLATFORMS.map(p=>
+      <div class="field" style="width:230px;margin:0"><label data-i18n="Platform">Platform</label>
+        <select id="s-plat"><option value="" data-i18n="Any platform">Any platform</option>${PLATFORMS.map(p=>
           `<option value="${esc(p.slug)}">${esc(p.name)}</option>`).join('')}</select></div>
-      <button class="btn" id="s-go" style="margin-top:20px">Search</button>
+      <button class="btn" id="s-go" data-i18n="Search" style="margin-top:20px">Search</button>
     </div>
     <p class="help" style="margin-top:10px">Without a platform there is no
       platform evidence to score on, so the ranking means less. Pick one when
       you can.</p>
     <div id="s-out" style="margin-top:16px"></div></div>`;
+  applyInterfaceLanguage();
 
   const mb=n=>n>=1048576?(n/1048576).toLocaleString(getRegionalLocale(),{maximumFractionDigits:1})+' MB'
     :n>0?(n/1024).toLocaleString(getRegionalLocale(),{maximumFractionDigits:0})+' KB':'—';
@@ -1332,7 +1342,7 @@ RENDER.search=async()=>{
   const run=async()=>{
     const game=$('#s-name').value.trim(), platform=$('#s-plat').value;
     if(!game){toast('Enter a game name');return;}
-    $('#s-out').innerHTML='<div class="empty">Searching every indexer…</div>';
+    $('#s-out').innerHTML='<div class="empty" data-i18n="Searching indexers…">Searching indexers…</div>'; applyInterfaceLanguage();
     const d=await j(`/api/v1/release?game=${encodeURIComponent(game)}`
       +`&platform=${encodeURIComponent(platform)}`);
     if(d.error){
@@ -1349,8 +1359,8 @@ RENDER.search=async()=>{
       <p class="help"><b>${fmt(d.found)}</b> releases, <b>${fmt(d.accepted)}</b> of them
         acceptable. Rejected rows are shown too, because why a release was
         refused is usually the answer you came for.</p>
-      <table><thead><tr><th>Score</th><th>Release</th><th>Size</th>
-        <th>Seeders</th><th>Indexer</th><th>Why</th><th></th></tr></thead><tbody>
+      <table><thead><tr><th data-i18n="Score">Score</th><th data-i18n="Release">Release</th><th data-i18n="Size">Size</th>
+        <th data-i18n="Seeders">Seeders</th><th data-i18n="Indexer">Indexer</th><th data-i18n="Why">Why</th><th></th></tr></thead><tbody>
       ${d.items.map((r,i)=>`<tr style="${r.accepted?'':'opacity:.62'}">
         <td><span class="pill ${r.accepted?'imported':'failed'}">${num(r.score)}</span></td>
         <td>${esc(r.title)}${r.info_url?` <a href="${esc(r.info_url)}" target="_blank"
@@ -1363,16 +1373,17 @@ RENDER.search=async()=>{
         <td style="color:var(--dim)">${esc(r.indexer||'—')}</td>
         <td style="color:var(--dim);font-size:12px">${r.reasons.map(esc).join('<br>')}</td>
         <td><div class="rowact">${r.grabbable
-          ? `<button data-grab="${esc(r.id)}">Grab</button>`
+          ? `<button data-grab="${esc(r.id)}" data-i18n="Grab">Grab</button>`
           : '<span style="color:var(--dim);font-size:12px">no link</span>'}</div></td>
         </tr>`).join('')}</tbody></table>`;
 
+    applyInterfaceLanguage();
     document.querySelectorAll('[data-grab]').forEach(b=>b.onclick=async()=>{
-      b.disabled=true; b.textContent='Grabbing…';
+      b.disabled=true; b.dataset.i18n='Grabbing…'; applyTranslatedLabel(b,readInterfaceLanguage());
       const r=await j('/api/v1/release/grab',{method:'POST',
         headers:{'content-type':'application/json'},
         body:JSON.stringify({id:b.dataset.grab})});
-      b.textContent=r.ok?'Grabbed':'Failed';
+      b.dataset.i18n=r.ok?'Grabbed':'Failed'; applyTranslatedLabel(b,readInterfaceLanguage());
       toast(r.ok?`Grabbed ${r.release}`:(r.error||'Could not grab that release'));
       refreshCounts();
     });
@@ -4243,7 +4254,7 @@ def page() -> str:
 <div id="navwrap">{_nav_html()}</div>
 {_theme_control_html()}</nav>
 <div id="main">
-  <div id="top"><h1 data-i18n="Games">Games</h1><input id="search" placeholder="Filter…" autocomplete="off"></div>
+  <div id="top"><h1 data-i18n="Games">Games</h1><input id="search" data-i18n-placeholder="Filter…" placeholder="Filter…" autocomplete="off"></div>
   <div class="page" id="page"></div>
 </div>
 <script>{JS}</script></body></html>"""
