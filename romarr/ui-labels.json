@@ -1902,5 +1902,33 @@
     "zh-Hant": "輸入遊戲名稱",
     "vi": "Nhập tên trò chơi",
     "id": "Masukkan nama game"
+  },
+  "On disk & catalogued": {
+    "es": "En disco y catalogados",
+    "zh-Hans": "磁盘中和目录中",
+    "hi": "डिस्क पर और कैटलॉग में",
+    "de": "Auf Datenträger und katalogisiert",
+    "ja": "ディスク上・カタログ登録済み",
+    "fr": "Sur disque et catalogués",
+    "pt-BR": "No disco e catalogados",
+    "ar": "على القرص ومُدرج في الفهرس",
+    "ko": "디스크 및 카탈로그 등록됨",
+    "zh-Hant": "磁碟上與目錄中",
+    "vi": "Trên đĩa và trong danh mục",
+    "id": "Di disk dan terdata"
+  },
+  "Any source": {
+    "es": "Cualquier origen",
+    "zh-Hans": "任意来源",
+    "hi": "कोई भी स्रोत",
+    "de": "Alle Quellen",
+    "ja": "すべてのソース",
+    "fr": "Toutes les sources",
+    "pt-BR": "Qualquer origem",
+    "ar": "أي مصدر",
+    "ko": "모든 출처",
+    "zh-Hant": "任何來源",
+    "vi": "Mọi nguồn",
+    "id": "Semua sumber"
   }
 }

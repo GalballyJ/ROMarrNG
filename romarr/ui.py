@@ -1341,7 +1341,7 @@ RENDER.search=async()=>{
 
   const run=async()=>{
     const game=$('#s-name').value.trim(), platform=$('#s-plat').value;
-    if(!game){toast('Enter a game name');return;}
+    if(!game){toast(translateLabel('Enter a game name',readInterfaceLanguage()));return;}
     $('#s-out').innerHTML='<div class="empty" data-i18n="Searching indexers…">Searching indexers…</div>'; applyInterfaceLanguage();
     const d=await j(`/api/v1/release?game=${encodeURIComponent(game)}`
       +`&platform=${encodeURIComponent(platform)}`);

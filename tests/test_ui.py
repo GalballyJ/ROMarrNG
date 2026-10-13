@@ -49,6 +49,18 @@ def test_interface_language_name_is_localized_and_fallback_content_stays_english
     assert "el.lang=translated?language:'en'" in html
 
 
+def test_library_and_search_labels_cover_selectable_interface_languages():
+    from romarr.ui import UI_LABELS
+
+    html = page()
+    selector = re.search(r'<select id="interface-language"[^>]*>(.*?)</select>', html, re.S)
+    assert selector
+    selectable = set(re.findall(r'<option value="([^"]+)"', selector.group(1))) - {"en"}
+    for label in ("On disk & catalogued", "Any source", "Enter a game name"):
+        assert selectable <= UI_LABELS[label].keys(), f"{label} is missing translations"
+    assert "if(!game){toast(translateLabel('Enter a game name',readInterfaceLanguage()));return;}" in html
+
+
 def test_the_libraries_page_is_in_the_nav_and_rendered():
     """A feature configured only by hand-editing settings.json is not one most
     people can use."""
