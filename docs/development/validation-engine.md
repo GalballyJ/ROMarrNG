@@ -53,11 +53,16 @@ enforcement can be reconsidered. The Linux validation job uses `setup-python`
 with Python 3.13 and creates its temporary workspace beneath
 `RUNNER_TEMP`. It uses the validation engine to install repository
 requirements, pytest, and test-only PyYAML in a task environment before
-running the native suite. The test task uses
-`pytest.ini` as configured, including its default `not network`
-marker, so tests that reach the public internet remain deselected. The engine
-counts passed, skipped, failed, and deselected tests from pytest's summary and
-does not call an empty run successful.
+running the native suite. The engine divides discovered test files into four
+disjoint inventory shards and runs at most two shards at once after dependency
+installation completes. Each shard has its own environment and log, and
+disables pytest's shared cache plugin. The test tasks use `pytest.ini` as
+configured, including its default `not network` marker, so tests that reach the
+public internet remain deselected. The engine counts passed, skipped, failed,
+and deselected cases from every pytest summary, records each shard's file
+inventory in one receipt, and does not call an empty run successful. Image
+validation reconciles every shard against that same source receipt before
+building.
 
 Pull-request image jobs smoke-test the Alpine image and build the browser
 image for its supported platforms, all with read-only repository permissions.
@@ -68,12 +73,12 @@ tags after both published images succeed.
 
 The engine writes a compact task summary to stderr at task start and completion,
 with a once-per-minute heartbeat during long tasks. Counts cover completed
-tasks; the active task and elapsed time are shown separately. GitHub publishes
+tasks; all active tasks and their elapsed times are shown separately. GitHub publishes
 workflow step summaries after the step finishes, so live progress appears in
 the step log.
 
 Each run uses a new private temporary directory for its receipt and hashed
-pytest log. The candidate fingerprint includes the Git commit/tree and diff,
+per-task logs. The candidate fingerprint includes the Git commit/tree and diff,
 untracked files, the discovered `tests/test_*.py` file hashes, and the test
 workflow, pytest configuration, and requirements input digests. A change during
 execution blocks the result. No result cache is reused. The engine drains child
