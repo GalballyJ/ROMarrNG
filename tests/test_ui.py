@@ -81,15 +81,19 @@ def test_interface_language_choice_survives_storage_failure_for_current_tab():
         )
     ]
     harness = r"""
-let changeLanguage;
+let changeLanguage, syncLanguage;
+let storedLanguage = null;
 const selector = {
   value: "en",
   addEventListener: (_name, handler) => { changeLanguage = handler; }
 };
 globalThis.navigator = {languages: ["en"], language: "en"};
 globalThis.localStorage = {
-  getItem: () => null,
+  getItem: () => storedLanguage,
   setItem: () => { throw new Error("storage unavailable"); }
+};
+globalThis.window = {
+  addEventListener: (_name, handler) => { syncLanguage = handler; }
 };
 globalThis.document = {
   documentElement: {},
@@ -100,13 +104,21 @@ globalThis.document = {
 selector.value = "de";
 changeLanguage();
 applyInterfaceLanguage();
-console.log(JSON.stringify({language: readInterfaceLanguage(), selected: selector.value}));
+const storageFailureChoice = readInterfaceLanguage();
+storedLanguage = "fr";
+syncLanguage({key: INTERFACE_LANGUAGE_KEY, newValue: storedLanguage});
+console.log(JSON.stringify({
+  storageFailureChoice,
+  crossTabLanguage: readInterfaceLanguage(),
+  selected: selector.value
+}));
 """
     result = subprocess.run(
         [node, "-e", harness], text=True, capture_output=True, timeout=15
     )
     assert result.returncode == 0, result.stderr
-    assert '"language":"de","selected":"de"' in result.stdout
+    assert '"storageFailureChoice":"de"' in result.stdout
+    assert '"crossTabLanguage":"fr","selected":"fr"' in result.stdout
 
 
 def test_the_libraries_page_is_in_the_nav_and_rendered():

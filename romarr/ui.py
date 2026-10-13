@@ -4231,6 +4231,11 @@ async function refreshCounts(){
       applyInterfaceLanguage(language);
     });
   }
+  window.addEventListener('storage',event=>{
+    if(event.key!==INTERFACE_LANGUAGE_KEY)return;
+    activeInterfaceLanguage=INTERFACE_LANGUAGES.includes(event.newValue)?event.newValue:null;
+    applyInterfaceLanguage();
+  });
   applyInterfaceLanguage();
   bindTheme();
   let searchTimer=null;
