@@ -626,7 +626,7 @@ def _theme_control_html() -> str:
         for code, label in [
             ('en', 'English'), ('es', 'Español — Spanish'), ('zh-Hans', '简体中文 — Simplified Chinese'), ('hi', 'हिन्दी — Hindi'),
             ('de', 'Deutsch — German'), ('ja', '日本語 — Japanese'), ('fr', 'Français — French'), ('pt-BR', 'Português (Brasil) — Brazilian Portuguese'),
-            ('ar', 'العربية — Arabic'), ('ko', '한국어 — Korean'), ('zh-Hant', '繁體中文 — Traditional Chinese'), ('vi', 'Tiếng Việt — Vietnamese'), ('id', 'Bahasa Indonesia — Indonesian'),
+            ('ko', '한국어 — Korean'), ('zh-Hant', '繁體中文 — Traditional Chinese'), ('vi', 'Tiếng Việt — Vietnamese'), ('id', 'Bahasa Indonesia — Indonesian'),
         ]
     )
     return (
@@ -692,7 +692,7 @@ JS = r"""
 const UI_LABELS=__UI_LABELS__;
 const $=s=>document.querySelector(s);
 const INTERFACE_LANGUAGE_KEY='romarrng.interface-language';
-const INTERFACE_LANGUAGES=['en','es','zh-Hans','hi','de','ja','fr','pt-BR','ar','ko','zh-Hant','vi','id'];
+const INTERFACE_LANGUAGES=['en','es','zh-Hans','hi','de','ja','fr','pt-BR','ko','zh-Hant','vi','id'];
 const browserInterfaceLanguage=()=>{
   for(const candidate of (navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language])){
     const normalized=String(candidate||'').toLowerCase(), base=normalized.split(/[-_]/)[0];
@@ -761,7 +761,7 @@ const applyRegionalFormat=(value,control)=>{
   return true;
 };
 const regionalFormatField=()=>{
-  const current=readRegionalPreference();
+  const current=activeRegionalPreference;
   const language=readInterfaceLanguage();
   const metadata=(source)=>{
     const translated=Boolean(UI_LABELS[source]?.[language]);
@@ -769,7 +769,10 @@ const regionalFormatField=()=>{
   };
   const options=REGIONAL_FORMATS.map(([code,label])=>{
     const text=code==='system'?translateLabel(label,language):label;
-    return '<option value="'+esc(code)+'"'+(code===current?' selected':'')+'>'+esc(text)+'</option>';
+    const translation=code==='system'
+      ? ' data-i18n="'+esc(label)+'"'+metadata(label)
+      : '';
+    return '<option value="'+esc(code)+'"'+translation+(code===current?' selected':'')+'>'+esc(text)+'</option>';
   }).join('');
   const formatLabel='Date, time, and number format';
   const formatHelp='This changes date and number formats only; it is separate from interface language.';
