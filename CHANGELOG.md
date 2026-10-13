@@ -1,12 +1,22 @@
 # Changelog
 
-## [0.14.8] - 2026-10-12
+## [0.14.8] - 2026-10-13
 
 ### User-facing changes
 
 #### Added
 
-- **Settings:** Settings > General lets each browser choose regional date, time, and number formatting, defaulting to browser settings. Counts, ratings, sizes, dates, and timestamps use that region; date-only values keep their day and anniversaries stay yearless. The choice stays in that browser. Interface text remains English; ROM translation filters are unchanged.
+- **Settings:** Settings > General lets each browser choose regional date, time, and number formatting, defaulting to browser settings. Counts, ratings, sizes, dates, and timestamps use that region; date-only values keep their day and anniversaries stay yearless. The choice stays in that browser. Regional formatting does not change the selected interface language or ROM translation filters.
+- **Interface Language:** ROMarr lets each browser choose from eleven interface languages, with English fallback. Navigation, page titles, Library filters, request workflows, and Interactive Search use translated labels, actions, and grab statuses. Arabic interface support remains deferred until right-to-left layout and core workflows are reviewed; Arabic is available as a regional-format preference.
+
+#### Changed
+
+- **Localization:** The regional-format control now explains browser-default formatting in the selected interface language. When browser storage is unavailable, the selected format continues to apply for the current tab.
+
+#### Security
+
+- **Credentials:** Validation snapshots exclude dotted and extensionless credentials, private/API keys, access/refresh-token and client-secret material, suffixed dotenv credentials, and non-source files under credential folders. Source modules and safe templates such as tokens.env.example remain available to tests.
+- **Validation:** ROMarrNG validation now uses GitHub-hosted runners for every event. Public workflow jobs no longer execute on a persistent local machine.
 
 ## [0.14.7] - 2026-10-12
 

@@ -1,7 +1,7 @@
 ---
 category: added
 audience: users
-area: ui
+area: interface-language
 action: none
 breaking: false
 ---
