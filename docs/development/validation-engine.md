@@ -28,14 +28,16 @@ through it too, because planning imports candidate validation configuration.
 GitHub Actions remains responsible for receipt-backed hosted validation.
 
 In CI, `--plan` discovers files and required commands without installing
-packages or running pytest. Pull requests, version-tag pushes, and manual runs
-targeting refs other than `main` use GitHub-hosted Ubuntu. Same-repository
-branch pushes and manual runs targeting `main` use whichever repository-local
-Linux runner is available (`kspld0` or `kspls0`). The hosted jobs
-use `setup-python`; the local job provisions Python 3.13 with a disposable uv
-virtualenv under the runner's private temporary directory. Both paths use the
-same validation engine, which installs repository requirements and pytest in
-a task environment before running the native suite. The test task uses
+packages or running pytest. Pull requests, main-branch pushes, version-tag
+pushes, and manual runs use GitHub-hosted runners. Pushes to other branches do
+not trigger this workflow. Because this is a public repository, no workflow
+job uses a persistent self-hosted runner; the workflow definition itself can
+be changed by a pull request, so runner selection cannot be treated as a
+security boundary inside contributor-controlled YAML. The Linux validation
+job uses `setup-python` and creates its temporary workspace beneath
+`RUNNER_TEMP`. It uses the validation engine to install repository
+requirements and pytest in a task environment before running the native
+suite. The test task uses
 `pytest.ini` as configured, including its default `not network`
 marker, so tests that reach the public internet remain deselected. The engine
 counts passed, skipped, failed, and deselected tests from pytest's summary and

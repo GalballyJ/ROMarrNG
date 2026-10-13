@@ -271,23 +271,80 @@ def test_the_install_guide_exists_and_the_readme_sends_people_to_it():
     assert "docs/INSTALL.md" in README.read_text(encoding="utf-8"), (
         "the full install guide is unreachable from the README")
 
-def test_trusted_branch_pushes_use_an_available_private_local_validation_runner():
+def test_public_workflow_uses_hosted_runners_and_only_main_pushes_trigger():
     workflow = (ROOT / ".github" / "workflows" / "docker.yml").read_text(
         encoding="utf-8"
     )
-    assert 'branches: ["**"]' in workflow
+    assert 'branches: ["main"]' in workflow
+    assert 'branches: ["**"]' not in workflow
     assert 'tags: ["v*"]' in workflow
 
     test_job = workflow.split("  test:\n", 1)[1].split(
         "\n  validation-environment-portability:", 1
     )[0]
-    assert "github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')" in test_job
-    assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in test_job
-    assert (
-        "fromJSON('[\"self-hosted\",\"Linux\",\"X64\",\"host\",\"linux-build\",\"linux-amd64\"]')"
-        in test_job
-    )
-    assert "|| fromJSON('[\"ubuntu-latest\"]')" in test_job
+    assert "runs-on: ubuntu-latest" in test_job
+    assert "fromJSON(" not in test_job
+    assert "fromJSON('[\"self-hosted\"" not in workflow
+
+    workflow_dir = ROOT / ".github" / "workflows"
+    runner_assignments = []
+    for workflow_file in sorted(workflow_dir.iterdir()):
+        if workflow_file.suffix not in {".yml", ".yaml"}:
+            continue
+        in_jobs = False
+        current_job = None
+        current_job_lines = []
+        job_blocks = []
+        for line in workflow_file.read_text(encoding="utf-8").splitlines():
+            if line == "jobs:":
+                in_jobs = True
+                continue
+            if not in_jobs:
+                continue
+            if line and not line.startswith(" "):
+                break
+            job_match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+            if job_match:
+                if current_job is not None:
+                    job_blocks.append((current_job, current_job_lines))
+                current_job = job_match.group(1)
+                current_job_lines = []
+            elif current_job is not None:
+                current_job_lines.append(line)
+        if current_job is not None:
+            job_blocks.append((current_job, current_job_lines))
+
+        for job_name, job_lines in job_blocks:
+            job_text = "\n".join(job_lines)
+            runner_match = re.search(r"(?m)^\s+runs-on:\s*(.*?)\s*$", job_text)
+            if runner_match is None:
+                continue
+            runner = runner_match.group(1)
+            runner_assignments.append((workflow_file.name, job_name, runner))
+            assert runner in {"ubuntu-latest", "${{ matrix.os }}"}, (
+                f"{workflow_file.name}/{job_name} must use a hosted runner: {runner}"
+            )
+
+            if runner == "${{ matrix.os }}":
+                matrix_values = re.findall(
+                    r"(?m)^\s+os:\s*\[(.*?)\]\s*$", job_text
+                )
+                assert len(matrix_values) == 1, (
+                    f"{workflow_file.name}/{job_name} must declare one literal OS matrix"
+                )
+                labels = {
+                    item.strip().strip("\"'")
+                    for item in matrix_values[0].split(",")
+                    if item.strip()
+                }
+                assert labels and labels <= {
+                    "ubuntu-latest", "macos-latest", "windows-latest"
+                }, (
+                    f"{workflow_file.name}/{job_name} matrix must use hosted OS labels: {labels}"
+                )
+
+    assert runner_assignments, "no checked-in workflow runner assignments were found"
+
     assert "prepare-private-runner-temp.sh" in test_job
     assert "PRIVATE_RUNNER_TEMP_PREFIX: romarr" in test_job
     helper = (ROOT / "scripts" / "prepare-private-runner-temp.sh").read_text(
