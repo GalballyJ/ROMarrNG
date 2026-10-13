@@ -52,6 +52,7 @@ def main():
         fixtures = Path(__file__).parent / "fixtures"
         cert = fixtures / "hub-proof.crt"
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(cert, fixtures / "hub-proof.key")
         source.socket = context.wrap_socket(source.socket, server_side=True)
         os.environ["SSL_CERT_FILE"] = str(cert)
