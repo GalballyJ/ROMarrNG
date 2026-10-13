@@ -680,7 +680,93 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // Library counts here run to six figures; grouped, they are readable at a
 // glance instead of a digit-counting exercise.
-const fmt=n=>Number(n||0).toLocaleString();
+const REGIONAL_FORMAT_KEY='romarrng.regional-format';
+const REGIONAL_FORMATS=[["system", "Use browser settings"], ["es", "Español — Spanish"], ["zh-CN", "简体中文 — Chinese (Simplified)"], ["hi-IN", "हिन्दी — Hindi"], ["de", "Deutsch — German"], ["ja", "日本語 — Japanese"], ["fr", "Français — French"], ["pt-BR", "Português (Brasil) — Brazilian Portuguese"], ["ar", "العربية — Arabic"], ["ko", "한국어 — Korean"], ["zh-TW", "繁體中文 — Chinese (Traditional)"], ["vi", "Tiếng Việt — Vietnamese"], ["id", "Bahasa Indonesia — Indonesian"]];
+const getRegionalLocale=()=>{
+  try{
+    const value=localStorage.getItem(REGIONAL_FORMAT_KEY);
+    return REGIONAL_FORMATS.some(([code])=>code===value)&&value!=='system'?value:undefined;
+  }catch(_){return undefined;}
+};
+const setRegionalLocale=value=>{
+  if(!REGIONAL_FORMATS.some(([code])=>code===value)) return false;
+  try{
+    if(value==='system') localStorage.removeItem(REGIONAL_FORMAT_KEY);
+    else localStorage.setItem(REGIONAL_FORMAT_KEY,value);
+    return true;
+  }catch(_){return false;}
+};
+const applyRegionalFormat=(value,control)=>{
+  if(!setRegionalLocale(value)){
+    if(control) control.value=getRegionalLocale()||'system';
+    return false;
+  }
+  refreshCounts();
+  return true;
+};
+const regionalFormatField=()=>{
+  let current='system';
+  try{current=localStorage.getItem(REGIONAL_FORMAT_KEY)||'system';}catch(_){}
+  if(!REGIONAL_FORMATS.some(([code])=>code===current)) current='system';
+  const options=REGIONAL_FORMATS.map(([code,label])=>'<option value="'+esc(code)+'"'+(code===current?' selected':'')+'>'+esc(label)+'</option>').join('');
+  return '<div class="field"><label for="g-regional-format">Date, time, and number format</label>'+
+    '<select id="g-regional-format" aria-describedby="g-regional-format-help">'+options+'</select>'+
+    '<div id="g-regional-format-help" style="color:var(--dim);font-size:11.5px;margin-top:4px">Choose how dates and numbers are shown in this browser. Interface text remains English.</div></div>';
+};
+const fmt=n=>Number(n??0).toLocaleString(getRegionalLocale());
+const num=n=>n===null||n===undefined?'—':fmt(n);
+const utcCalendarDate=(year,month,day)=>{
+  const date=new Date(0);
+  date.setUTCFullYear(year,month-1,day);
+  return date.getUTCFullYear()===year&&date.getUTCMonth()===month-1
+    &&date.getUTCDate()===day?date:null;
+};
+const regionalDate=value=>{
+  if(value===null||value===undefined||value==='') return '—';
+  const source=String(value);
+  const monthDay=/^(\d{2})-(\d{2})$/.exec(source);
+  if(monthDay){
+    const month=Number(monthDay[1]),day=Number(monthDay[2]);
+    const date=utcCalendarDate(2000,month,day);
+    if(!date) return source;
+    return new Intl.DateTimeFormat(getRegionalLocale(),{
+      month:'short',day:'numeric',timeZone:'UTC'}).format(date);
+  }
+  const dayOnly=/^(\d{4})-(\d{2})-(\d{2})$/.exec(source);
+  if(dayOnly){
+    const date=utcCalendarDate(Number(dayOnly[1]),Number(dayOnly[2]),Number(dayOnly[3]));
+    return date?date.toLocaleDateString(getRegionalLocale(),{timeZone:'UTC'}):source;
+  }
+  const date=new Date(source);
+  return Number.isNaN(date.getTime())?source:date.toLocaleDateString(getRegionalLocale());
+};
+const regionalDateTime=value=>{
+  if(value===null||value===undefined||value==='') return '—';
+  const source=String(value);
+  const dayOnly=/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/.exec(source);
+  if(dayOnly&&!utcCalendarDate(Number(dayOnly[1]),Number(dayOnly[2]),Number(dayOnly[3])))
+    return source;
+  const date=value instanceof Date?value:new Date(value);
+  return Number.isNaN(date.getTime())?String(value)
+    :date.toLocaleString(getRegionalLocale());
+};
+const regionalEpochDateTime=value=>{
+  if(value===null||value===undefined||value==='') return '—';
+  return regionalDateTime(Number(value)*1000);
+};
+const regionalMonth=value=>{
+  const match=/^(\d{4})-(\d{2})$/.exec(String(value||''));
+  if(!match) return String(value||'');
+  const date=utcCalendarDate(Number(match[1]),Number(match[2]),1);
+  if(!date) return String(value||'');
+  return new Intl.DateTimeFormat(getRegionalLocale(),{
+    month:'long',year:'numeric',timeZone:'UTC'}).format(date);
+};
+const regionalYear=value=>{
+  const year=Number(value);
+  return Number.isFinite(year)?year.toLocaleString(getRegionalLocale(),{
+    useGrouping:false}):String(value??'');
+};
 let PLATFORMS=[], SETTINGS={};
 
 function toast(msg){
@@ -792,10 +878,10 @@ RENDER.hub=async()=>{
     const facets=(d.facets&&d.facets.capabilities)||[];
     const chips=facets.map(([name,n])=>
       '<span class="chip'+(cap===name?' on':'')+'" data-cap="'+esc(name)+'">'
-      +esc(name)+'<span class="n">'+n+'</span></span>').join('');
+      +esc(name)+'<span class="n">'+fmt(n)+'</span></span>').join('');
 
     p.innerHTML=sandboxNote+acqNote+'<div class="card"><h3>Plugins'
-      +'<span class="help" style="margin-left:10px">'+items.length+' of '+(d.total||0)+'</span></h3>'
+      +'<span class="help" style="margin-left:10px">'+fmt(items.length)+' of '+fmt(d.total||0)+'</span></h3>'
       +'<div class="cat-bar">'
       +'<input id="pq" placeholder="Search plugins by name, author or description…" value="'+esc(q)+'">'
       +'<span class="chip'+(inst==='1'?' on':'')+'" data-inst="1">Installed</span>'
@@ -915,7 +1001,6 @@ const SOURCE_LABEL={
   archive:'Archive.org (streams)',
   flashpoint:'Flashpoint (streams)',
   cloud:'Catalogued, source unknown'};
-const num=n=>(n===null||n===undefined)?'—':Number(n).toLocaleString();
 RENDER.library=async()=>{
   const p=$('#page');
   if(!p.querySelector('#lib-grid')) p.innerHTML='<div class="empty">Loading library…</div>';
@@ -954,14 +1039,14 @@ RENDER.library=async()=>{
     const part=x.cached!==undefined&&x.cached<x.count;
     const cat=x.catalogued||0, disk=x.on_disk||0;
     const mixed=cat>0;
-    const tip=[part?`${x.cached} of ${x.count} loaded so far`:'',
-               mixed?`${disk} on disk · ${cat} catalogued elsewhere`:'']
+    const tip=[part?`${fmt(x.cached)} of ${fmt(x.count)} loaded so far`:'',
+               mixed?`${fmt(disk)} on disk · ${fmt(cat)} catalogued elsewhere`:'']
               .filter(Boolean).join(' — ');
     return `<button class="btn ${LIB.platform===x.platform?'':'ghost'}" data-plat="${esc(x.platform)}"
       style="padding:4px 10px;font-size:12px"
       title="${esc(tip)}">${esc(x.platform)}
-      <span style="opacity:.7">${part?x.cached+'/'+x.count:x.count}</span>
-      ${mixed?`<span style="opacity:.55;font-size:11px">(${disk}&nbsp;here)</span>`:''}</button>`;
+      <span style="opacity:.7">${part?fmt(x.cached)+'/'+fmt(x.count):fmt(x.count)}</span>
+      ${mixed?`<span style="opacity:.55;font-size:11px">(${fmt(disk)}&nbsp;here)</span>`:''}</button>`;
   }).join('');
   const f=d.facets||{};
   const sel=(key,label,list,fmt)=>{
@@ -969,7 +1054,7 @@ RENDER.library=async()=>{
     return `<select data-lf="${key}" style="padding:4px 8px;font-size:12px">
       <option value="">${label}</option>
       ${list.map(x=>`<option value="${esc(x.value)}"${LIB[key]===x.value?' selected':''}
-        >${esc(fmt?fmt(x.value):x.value)} (${x.count})</option>`).join('')}
+        >${esc(fmt?fmt(x.value):x.value)} (${num(x.count)})</option>`).join('')}
     </select>`;
   };
   const coverage=f.identified&&d.grand_total
@@ -1003,7 +1088,7 @@ RENDER.library=async()=>{
   const head=banner+`<div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
       <button class="btn ${LIB.platform?'ghost':''}" data-plat=""
         style="padding:4px 10px;font-size:12px">All
-        <span style="opacity:.7">${d.grand_total}</span></button>${chips}</div>
+        <span style="opacity:.7">${fmt(d.grand_total)}</span></button>${chips}</div>
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px;align-items:center">
       ${sel('genre','Any genre',f.genres)}
       ${sel('region','Any region',f.regions)}
@@ -1021,13 +1106,13 @@ RENDER.library=async()=>{
       ${(LIB.genre||LIB.region||LIB.decade||LIB.origin||LIB.source||LIB.sort)
         ?'<button class="btn ghost" id="lf-clear" style="padding:4px 10px;font-size:12px">Clear filters</button>':''}
       ${(f.genres||[]).length?`<span class="help" style="margin:0;font-size:11.5px">
-        genre/year known for ${f.identified} of ${d.grand_total} (${coverage}%) —
+        genre/year known for ${fmt(f.identified)} of ${fmt(d.grand_total)} (${fmt(coverage)}%) —
         run a metadata scan in your library server to raise it</span>`:''}
     </div>
     <p class="help" style="margin-bottom:10px">
-      Showing ${d.total?LIB.offset+1:0}–${Math.min(LIB.offset+items.length,d.total)}
-      of ${d.total}${LIB.platform?` on ${esc(LIB.platform)}`:''}${q?` matching “${esc(q)}”`:''}
-      · ${d.grand_total} cached across ${(d.platforms||[]).length} platforms
+      Showing ${fmt(d.total?LIB.offset+1:0)}–${fmt(Math.min(LIB.offset+items.length,d.total))}
+      of ${fmt(d.total)}${LIB.platform?` on ${esc(LIB.platform)}`:''}${q?` matching “${esc(q)}”`:''}
+      · ${fmt(d.grand_total)} cached across ${fmt((d.platforms||[]).length)} platforms
       ${d.partial?' · <b>still loading from the library server…</b>':''}
       ${d.error?` · <span style="color:var(--warn)">last refresh: ${esc(d.error)}</span>`:''}</p>`;
 
@@ -1047,7 +1132,7 @@ RENDER.library=async()=>{
     if(!x) return '';
     const bits=[];
     if(x.status) bits.push(`<span class="pill">${esc(x.status)}</span>`);
-    if(x.rating) bits.push(`<span class="pill">★ ${x.rating}</span>`);
+    if(x.rating) bits.push(`<span class="pill">★ ${num(x.rating)}</span>`);
     return bits.length?`<div style="margin-top:2px">${bits.join(' ')}</div>`:'';
   };
   const grid=`<div class="grid" id="lib-grid">${items.map((g,i)=>`<div class="tile"
@@ -1058,7 +1143,7 @@ RENDER.library=async()=>{
   const more=LIB.offset+items.length<d.total
     ?`<div class="row" style="justify-content:center;margin:16px 0">
        <button class="btn" id="lib-more">Show more
-         (${d.total-LIB.offset-items.length} left)</button></div>`:'';
+         (${fmt(d.total-LIB.offset-items.length)} left)</button></div>`:'';
   p.innerHTML=head+grid+more;
   bindLibraryChips(p);
   const moreBtn=p.querySelector('#lib-more');
@@ -1099,7 +1184,7 @@ function shelfEditor(g, meta){
     <div class="field"><label>Rating</label>
       <select data-f="rating"><option value="0">unrated</option>
         ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${
-          meta.rating===n?' selected':''}>${'★'.repeat(Math.ceil(n/2))} ${n}/10</option>`).join('')}
+          meta.rating===n?' selected':''}>${'★'.repeat(Math.ceil(n/2))} ${fmt(n)}/10</option>`).join('')}
       </select></div>
     <div class="field"><label>Notes</label>
       <textarea data-f="notes" rows="4"
@@ -1144,7 +1229,7 @@ RENDER.add=async()=>{
       body:JSON.stringify({game,platform})});
     $('#g-out').innerHTML=r.ok
       ? `<div class="card" style="margin:0"><h3>Grabbed</h3>
-         <p class="help">${esc(r.release)} — ${r.seeders} seeders</p></div>`
+         <p class="help">${esc(r.release)} — ${num(r.seeders)} seeders</p></div>`
       : `<div class="card" style="margin:0"><h3>Not grabbed</h3>
          <p class="help">${esc(r.error||'no usable release')}</p></div>`;
     refreshCounts();
@@ -1172,8 +1257,8 @@ RENDER.search=async()=>{
       you can.</p>
     <div id="s-out" style="margin-top:16px"></div></div>`;
 
-  const mb=n=>n>=1048576?(n/1048576).toFixed(1)+' MB'
-    :n>0?(n/1024).toFixed(0)+' KB':'—';
+  const mb=n=>n>=1048576?(n/1048576).toLocaleString(getRegionalLocale(),{maximumFractionDigits:1})+' MB'
+    :n>0?(n/1024).toLocaleString(getRegionalLocale(),{maximumFractionDigits:0})+' KB':'—';
 
   const run=async()=>{
     const game=$('#s-name').value.trim(), platform=$('#s-plat').value;
@@ -1192,20 +1277,20 @@ RENDER.search=async()=>{
       return;
     }
     $('#s-out').innerHTML=`
-      <p class="help"><b>${d.found}</b> releases, <b>${d.accepted}</b> of them
+      <p class="help"><b>${fmt(d.found)}</b> releases, <b>${fmt(d.accepted)}</b> of them
         acceptable. Rejected rows are shown too, because why a release was
         refused is usually the answer you came for.</p>
       <table><thead><tr><th>Score</th><th>Release</th><th>Size</th>
         <th>Seeders</th><th>Indexer</th><th>Why</th><th></th></tr></thead><tbody>
       ${d.items.map((r,i)=>`<tr style="${r.accepted?'':'opacity:.62'}">
-        <td><span class="pill ${r.accepted?'imported':'failed'}">${r.score}</span></td>
+        <td><span class="pill ${r.accepted?'imported':'failed'}">${num(r.score)}</span></td>
         <td>${esc(r.title)}${r.info_url?` <a href="${esc(r.info_url)}" target="_blank"
             rel="noopener noreferrer" title="Open on ${esc(r.indexer||'the indexer')}"
             style="text-decoration:none">&#8599;</a>`:''}
           ${r.private?' <span class="pill">private</span>':''}
           ${r.protocol==='usenet'?' <span class="pill">usenet</span>':''}</td>
         <td style="white-space:nowrap">${mb(r.size)}</td>
-        <td>${r.seeders}</td>
+        <td>${num(r.seeders)}</td>
         <td style="color:var(--dim)">${esc(r.indexer||'—')}</td>
         <td style="color:var(--dim);font-size:12px">${r.reasons.map(esc).join('<br>')}</td>
         <td><div class="rowact">${r.grabbable
@@ -1232,11 +1317,11 @@ RENDER.missing=async()=>{
   $('#page').innerHTML=`<div class="row" style="margin-bottom:14px">
       <button class="btn" id="w-all">Search All</button>
       <span style="color:var(--dim);font-size:12.5px">
-        ${d.items.length} game(s) requested but not yet imported</span></div>
+        ${fmt(d.items.length)} game(s) requested but not yet imported</span></div>
     ${d.items.length?`<table><thead><tr><th>Game</th><th>Platform</th>
       <th>Added</th><th>Attempts</th><th>Last error</th><th></th></tr></thead><tbody>
       ${d.items.map(w=>`<tr><td>${esc(w.game)}</td><td>${esc(w.platform)}</td>
-        <td>${esc(w.added.slice(0,10))}</td><td>${w.attempts}</td>
+        <td>${esc(regionalDate(w.added))}</td><td>${fmt(w.attempts)}</td>
         <td style="color:var(--dim)">${esc(w.last_error||'—')}</td>
         <td><button class="mini" data-drop-game="${esc(w.game)}"
           data-drop-platform="${esc(w.platform)}"
@@ -1248,7 +1333,7 @@ RENDER.missing=async()=>{
     const r=await j('/api/v1/command',{method:'POST',
       headers:{'content-type':'application/json'},
       body:JSON.stringify({name:'MissingGameSearch'})});
-    toast(`Searched ${r.searched??0}, grabbed ${r.grabbed??0}`);
+    toast(`Searched ${fmt(r.searched??0)}, grabbed ${fmt(r.grabbed??0)}`);
     go('missing'); refreshCounts();
   };
   // Dropping a request, which Wanted could not do at all: the list was only
@@ -1278,11 +1363,11 @@ RENDER.lists=async()=>{
       ${d.items.map((l,i)=>`<tr><td><b>${esc(l.name||'—')}</b>${
           l.type==='url'?`<div style="color:var(--dim);font-size:11.5px">${esc(l.url||'')}</div>`:''}</td>
         <td>${esc(l.type)}</td><td>${esc(l.platform||'per line')}</td>
-        <td>${l.added_count||0}${l.unmatched_count
-          ?` <span class="pill" title="Titles with no ROM platform — modern store games. Open Edit to see them.">${l.unmatched_count} kept aside</span>`:''}
+        <td>${fmt(l.added_count||0)}${l.unmatched_count
+          ?` <span class="pill" title="Titles with no ROM platform — modern store games. Open Edit to see them.">${fmt(l.unmatched_count)} kept aside</span>`:''}
           ${l.last_sync?`<div style="font-size:11px;color:${l.last_sync.error?'var(--warn)':'var(--dim)'}">
             ${l.last_sync.error?esc(l.last_sync.error.slice(0,90))
-              :`fetched ${l.last_sync.fetched} at ${esc((l.last_sync.at||'').replace('T',' ').slice(0,16))}`}</div>`:''}</td>
+              :`fetched ${fmt(l.last_sync.fetched)} at ${esc(regionalDateTime(l.last_sync.at))}`}</div>`:''}</td>
         <td><span class="dot ${l.enable!==false?'up':'down'}"></span></td>
         <td style="text-align:right"><div class="rowact">
           <button data-ledit="${i}">Edit</button></div></td></tr>`).join('')}
@@ -1493,7 +1578,7 @@ function editList(item){
       ${item.enable!==false?'checked':''}><span>Enabled</span></label>
     ${(item.unmatched||[]).length?`<details style="margin-top:10px">
       <summary class="help" style="margin:0;cursor:pointer">
-        ${item.unmatched.length} title(s) kept aside — no ROM platform.
+        ${fmt(item.unmatched.length)} title(s) kept aside — no ROM platform.
         These are your modern store games; ROMarr acquires ROMs, so they
         wait here rather than pretending to be cartridges.</summary>
       <div style="color:var(--dim);font-size:12px;max-height:180px;
@@ -1526,8 +1611,8 @@ function editList(item){
     if(r.error){ line(false,r.error); }
     else{
       const unresolved=r.items.filter(x=>x.unresolved).length;
-      line(!unresolved,`${r.total} title(s)`
-        +(unresolved?`, ${unresolved} with no resolvable platform`:'')
+      line(!unresolved,`${fmt(r.total)} title(s)`
+        +(unresolved?`, ${fmt(unresolved)} with no resolvable platform`:'')
         +(r.total?` — first: ${r.items[0].game}`:''));
     }
     e.target.disabled=false;
@@ -1601,16 +1686,16 @@ RENDER.discover=async()=>{
     }
     // Whatever the shelf is sorted on is what the subtitle leads with, so a
     // "Just added" grid is not a wall of tiles with no dates on them.
-    const sub=g=>DISC.shelf==='recently-added'?(g.added||'')
-      :DISC.shelf==='anniversary'?(g.released||'')
-      :(g.year?String(g.year):'');
+    const sub=g=>DISC.shelf==='recently-added'?regionalDate(g.added)
+      :DISC.shelf==='anniversary'?regionalDate(g.released)
+      :(g.year?regionalYear(g.year):'');
     $('#d-out').innerHTML=`<p class="help">${fmt(d.total)} game(s) on this
         shelf, from your own library's metadata — no API key involved.</p>
       <div class="grid">${items.map(g=>`<div class="tile">
         <div class="art" style="background-image:url('${esc(g.cover_url||'')}')"></div>
         <div class="nm">${esc(g.title)}</div>
         <div class="pf">${esc(g.platform||'')}${sub(g)?' · '+esc(sub(g)):''}${
-          g.rating?' · ★'+g.rating:''}${
+          g.rating?' · ★'+num(g.rating):''}${
           g.players&&g.players!=='1'?' · '+esc(g.players)+'p':''}</div>
         <div class="pf" style="padding-top:0;opacity:.75">${esc(
           (g.franchises||[]).concat(g.genres||[]).slice(0,2).join(' · '))}</div>
@@ -1643,7 +1728,7 @@ RENDER.discover=async()=>{
     return `<div class="tile">
       <div class="art" style="background-image:url('${esc(g.cover_url||'')}')"></div>
       <div class="nm">${esc(g.title)}</div>
-      <div class="pf">${esc(g.released||'')}${g.rating?' · ★'+g.rating.toFixed(1):''}</div>
+      <div class="pf">${esc(regionalDate(g.released))}${g.rating?' · ★'+num(g.rating):''}</div>
       <div class="pf" style="padding-top:0;opacity:.7">via ${esc(g.source||src)}</div>
       ${plats.length?`<div class="rowact" style="margin-top:4px">
         <button data-dreq="${i}">Request</button></div>`
@@ -1704,8 +1789,8 @@ RENDER.peers=async()=>{
         within seconds in a way that reads as lag. ROMarr can only match games
         whose hash it knows.</p>
       ${hx.count
-        ? `<div class="panel"><b>${hx.count.toLocaleString()}</b> dump(s) can be
-             matched, across ${Object.keys(hx.platforms||{}).length} platform(s).</div>`
+        ? `<div class="panel"><b>${fmt(hx.count)}</b> dump(s) can be
+             matched, across ${fmt(Object.keys(hx.platforms||{}).length)} platform(s).</div>`
         : `<div class="panel panel-warn">No hashes yet, so every netplay offer
              will come back <i>missing</i>. ROMarr reads these from your library
              server automatically — it already stores a hash for every ROM it
@@ -1765,7 +1850,7 @@ RENDER.peers=async()=>{
         <p class="help">This one <b>is</b> the secret. Say it out loud, text
           it, use a different app — anything that is not the same message as
           the link. It works once and expires in
-          <b id="p-codeleft">${Math.max(0,Math.round((r.code_expires_in||0)/60))} min</b>.</p></div>
+        <b id="p-codeleft">${fmt(Math.max(0,Math.round((r.code_expires_in||0)/60)))} min</b>.</p></div>
       <div class="row" style="gap:8px">
         <button class="btn ghost" id="p-copy">Copy the link</button>
         <button class="btn ghost" id="p-copycode">Copy the code</button></div>
@@ -1909,8 +1994,8 @@ RENDER.peers=async()=>{
     if(!live) return;
     if(st.running){
       live.innerHTML=`<div class="panel" style="margin-top:10px">
-        Reading your library — <b>${(st.seen||0).toLocaleString()}</b> entries
-        checked, <b>${(st.added||0).toLocaleString()}</b> with a hash so far.
+        Reading your library — <b>${fmt(st.seen||0)}</b> entries
+        checked, <b>${fmt(st.added||0)}</b> with a hash so far.
         You can leave this page.</div>`;
       setTimeout(seedPoll,2000);
     } else if(st.status==='done'&&st.seen){
@@ -1999,7 +2084,7 @@ async function friendShelf(peerId, opts){
   out.innerHTML=`<div style="margin-top:18px;border-top:1px solid var(--line);
       padding-top:16px">
     <h3 style="margin:0 0 4px">${esc(r.friend||'Your friend')}’s library</h3>
-    <p class="help">${r.total||0} of ${r.shelf_total||0} shared title(s).
+    <p class="help">${fmt(r.total||0)} of ${fmt(r.shelf_total||0)} shared title(s).
       ${r.access==='catalogue'
         ? 'You can add anything here to your own Wanted list — your '
           +'indexers fetch it, not your friend.'
@@ -2019,7 +2104,7 @@ async function friendShelf(peerId, opts){
       ${rows.map(g=>`<tr>
         <td>${esc(g.title||'')}</td>
         <td>${esc(g.platform||'')}</td>
-        <td>${g.year||''}</td>
+        <td>${g.year?regionalYear(g.year):''}</td>
         <td>${g.verified?'<span class="pill imported">verified</span>':''}</td>
         <td style="text-align:right"><div class="rowact">
           <button data-fwant="${esc(g.title||'')}"
@@ -2030,7 +2115,7 @@ async function friendShelf(peerId, opts){
       ${pages>1?`<div class="row" style="gap:8px;margin-top:10px">
         <button class="btn ghost" id="fs-prev"${page<=1?' disabled':''}>Previous</button>
         <span style="color:var(--dim);font-size:12px;align-self:center"
-          >Page ${page} of ${pages}</span>
+          >Page ${fmt(page)} of ${fmt(pages)}</span>
         <button class="btn ghost" id="fs-next"${page>=pages?' disabled':''}>Next</button>
       </div>`:''}`
       :'<div class="empty">Nothing matches. They may not share this platform.</div>'}
@@ -2180,7 +2265,7 @@ RENDER.stats=async()=>{
       <div style="flex:1;background:var(--line);border-radius:3px;height:14px">
         <div style="width:${Math.max(4,Math.round(v/max*100))}%;height:14px;
           background:var(--accent);border-radius:3px"></div></div>
-      <b style="width:48px">${v}</b></div>`).join('');
+      <b style="width:48px">${fmt(v)}</b></div>`).join('');
   };
   $('#page').innerHTML=`
     ${s.update_available?`<div class="card" style="border-color:var(--warn)">
@@ -2192,12 +2277,12 @@ RENDER.stats=async()=>{
       <div><b>${num(s.library_on_disk)}</b><span>On disk here</span></div>
       <div><b>${num(s.library_catalogued)}</b><span>Catalogued, streams</span></div>
       <div><b>${num(s.library_games)}</b><span>Total known</span></div>
-      <div><b>${s.wanted}</b><span>Wanted</span></div>
-      <div><b>${hours}h</b><span>Uptime</span></div>
-      <div><b>${(s.events||{}).grabbed||0}</b><span>Grabbed, ever</span></div>
-      <div><b>${(s.events||{}).imported||0}</b><span>Imported, ever</span></div>
-      <div><b>${(s.events||{}).failed||0}</b><span>Failures</span></div>
-      <div><b>${s.average_rating??'—'}</b><span>Avg rating (${s.rated||0} rated)</span></div>
+      <div><b>${fmt(s.wanted)}</b><span>Wanted</span></div>
+      <div><b>${fmt(hours)}h</b><span>Uptime</span></div>
+      <div><b>${fmt((s.events||{}).grabbed||0)}</b><span>Grabbed, ever</span></div>
+      <div><b>${fmt((s.events||{}).imported||0)}</b><span>Imported, ever</span></div>
+      <div><b>${fmt((s.events||{}).failed||0)}</b><span>Failures</span></div>
+      <div><b>${num(s.average_rating)}</b><span>Avg rating (${fmt(s.rated||0)} rated)</span></div>
     </div>
     <p class="help" style="margin:10px 0 0">“Total known” is the other two
       added together — every row your library server holds. Only the first
@@ -2225,9 +2310,9 @@ RENDER.stats=async()=>{
         <button class="btn" id="au-go">Audit</button></div>
       <div id="au-out" style="margin-top:10px"></div></div>
     <div class="card"><h3>Shelf</h3><div class="st">
-      <div><b>${(s.statuses||{}).playing||0}</b><span>Playing</span></div>
-      <div><b>${(s.statuses||{}).completed||0}</b><span>Completed</span></div>
-      <div><b>${(s.statuses||{}).shelved||0}</b><span>Shelved</span></div>
+      <div><b>${fmt((s.statuses||{}).playing||0)}</b><span>Playing</span></div>
+      <div><b>${fmt((s.statuses||{}).completed||0)}</b><span>Completed</span></div>
+      <div><b>${fmt((s.statuses||{}).shelved||0)}</b><span>Shelved</span></div>
     </div><p class="help">Set from any game tile in the Library.</p></div>`;
 
   const paintAudit=a=>{
@@ -2239,9 +2324,9 @@ RENDER.stats=async()=>{
     if(!a||!a.status||a.status==='never run'){out.innerHTML='';return;}
     out.innerHTML=`<p class="help">
       <b>${esc(a.platform||'')}</b> — ${esc(a.status)} ·
-      ${a.scanned||0} scanned · ${a.verified||0} verified ·
-      <b style="color:${a.bad?'var(--bad)':'inherit'}">${a.bad||0} bad</b> ·
-      ${a.unknown||0} unknown · ${(a.duplicates||[]).length} duplicate(s)</p>
+      ${fmt(a.scanned||0)} scanned · ${fmt(a.verified||0)} verified ·
+      <b style="color:${a.bad?'var(--bad)':'inherit'}">${fmt(a.bad||0)} bad</b> ·
+      ${fmt(a.unknown||0)} unknown · ${fmt((a.duplicates||[]).length)} duplicate(s)</p>
       ${(a.bad_files||[]).length?`<details><summary class="help"
         style="cursor:pointer;margin:0">Bad dumps</summary>
         <div style="color:var(--dim);font-size:12px">${a.bad_files.map(f=>
@@ -2274,12 +2359,12 @@ RENDER.queue=async()=>{
   const failed=(d.items||[]).filter(i=>i.state==='failed').length;
   $('#page').innerHTML=`<div class="row" style="margin-bottom:12px">
       <button class="btn ghost" id="q-import">Import completed now</button>
-      ${failed?`<button class="btn ghost" id="q-clearfail">Clear ${failed} failed</button>`:''}
-      <span class="help" style="margin:0">${(d.items||[]).length} in flight</span>
+      ${failed?`<button class="btn ghost" id="q-clearfail">Clear ${fmt(failed)} failed</button>`:''}
+      <span class="help" style="margin:0">${fmt((d.items||[]).length)} in flight</span>
     </div>`+(d.items.length?`<table><thead><tr><th>Game</th>
     <th>Platform</th><th>Release</th><th>Seeders</th><th>State</th><th></th></tr></thead><tbody>
     ${d.items.map((i,n)=>`<tr><td>${esc(i.game)}</td><td>${esc(i.platform)}</td>
-      <td>${esc(i.release||'—')}</td><td>${i.seeders||'—'}</td>
+      <td>${esc(i.release||'—')}</td><td>${num(i.seeders)}</td>
       <td><span class="pill ${esc(i.state)}">${esc(i.state)}</span>
       ${i.detail?`<div style="color:var(--dim);font-size:11.5px">${esc(i.detail)}</div>`:''}
       </td><td style="text-align:right"><div class="rowact">
@@ -2317,7 +2402,7 @@ RENDER.history=async()=>{
   const d=await j('/api/v1/history?limit=100');
   $('#page').innerHTML=d.items.length?`<table><thead><tr><th>When</th><th>Event</th>
     <th>Game</th><th>Platform</th><th>Release</th><th>Indexer</th></tr></thead><tbody>
-    ${d.items.map(e=>`<tr><td style="color:var(--dim)">${esc(e.at.replace('T',' ').slice(0,16))}</td>
+    ${d.items.map(e=>`<tr><td style="color:var(--dim)">${esc(regionalDateTime(e.at))}</td>
       <td><span class="pill ${esc(e.kind)}">${esc(e.kind)}</span></td>
       <td>${esc(e.game)}</td><td>${esc(e.platform)}</td>
       <td style="color:var(--dim)">${esc(e.release||'—')}</td>
@@ -2753,7 +2838,7 @@ RENDER.indexers=async()=>{
             <td><span class="dot ${item.success?'up':'down'}"></span>
               ${item.success?'connected':'failed'}${item.status?' · HTTP '+esc(item.status):''}</td>
             <td style="color:var(--dim)">${esc(item.error||item.recentFailure||'—')}
-              ${item.disabledUntil?`<br>Disabled until ${esc(item.disabledUntil)}`:''}</td>
+              ${item.disabledUntil?`<br>Disabled until ${esc(regionalDateTime(item.disabledUntil))}`:''}</td>
             </tr>`).join('')}</tbody></table>`
           :'<p class="help">No enabled torrent or usenet indexers were found.</p>'}
         </div>`;
@@ -2774,6 +2859,7 @@ RENDER.general=()=>settingsPage('General',
      <input type="text" value="${esc(SETTINGS._qbit_url||'')}" disabled></div>
    <div class="field"><label>RomM</label>
      <input type="text" value="${esc(SETTINGS._romm_url||'')}" disabled></div>
+   ${regionalFormatField()}
    <div class="field"><label>Your public URL (for Friends)</label>
      <input type="text" data-k="public_url"
        value="${esc(SETTINGS.public_url||'')}"
@@ -2821,6 +2907,10 @@ RENDER.general=()=>settingsPage('General',
         already a high-entropy secret and is not gated.</span></div>
     <pre id="g-totpout" style="display:none;font:12px/1.6 ui-monospace,Menlo,monospace;color:var(--dim);white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px"></pre>`,
   ()=>{
+    const regionalFormat=$('#g-regional-format');
+    if(regionalFormat) regionalFormat.onchange=()=>{
+      applyRegionalFormat(regionalFormat.value,regionalFormat);
+    };
     $('#g-key').onclick=async()=>{
       const d=await j('/api/v1/system/apikey').catch(()=>({}));
       $('#g-keyout').textContent=d.api_key||'could not read it';
@@ -2904,10 +2994,10 @@ RENDER.status=async()=>{
     ${moonlightCard(h.moonlight||{})}
     <div class="card"><h3>About</h3><div class="st">
       <div><b>${esc(h.version)}</b><span>Version</span></div>
-      <div><b>${h.platforms}</b><span>Platforms</span></div>
-      <div><b>${h.dats||0}</b><span>DATs loaded</span></div>
-      <div><b>${h.dat_games||0}</b><span>Known dumps</span></div>
-      <div><b>${h.events}</b><span>History events</span></div>
+      <div><b>${fmt(h.platforms)}</b><span>Platforms</span></div>
+      <div><b>${fmt(h.dats||0)}</b><span>DATs loaded</span></div>
+      <div><b>${fmt(h.dat_games||0)}</b><span>Known dumps</span></div>
+      <div><b>${fmt(h.events)}</b><span>History events</span></div>
       <div><b>${esc(h.uptime)}</b><span>Uptime</span></div>
       <div><b><a href="https://ko-fi.com/snapetech" target="_blank" rel="noopener noreferrer">Support ROMarrNG</a></b><span>Ko-fi</span></div>
     </div></div>
@@ -3105,19 +3195,19 @@ const moonlightCard=m=>{
       <div><b>${esc(m.hostname||m.host||'?')}</b><span>Host</span></div>
       <div><b>${esc(m.appversion||'?')}</b><span>Version</span></div>
       <div><b>${m.busy?'In a game':'Idle'}</b><span>State</span></div>
-      <div><b>${(m.paired||[]).length}</b><span>Paired clients</span></div>
+      <div><b>${fmt((m.paired||[]).length)}</b><span>Paired clients</span></div>
     </div>
 
     <h4 style="margin:18px 0 6px">What this host adds</h4>
     ${m.apps_read
       ? (slugs.length
-          ? `<p class="help">${slugs.length} platform${slugs.length===1?'':'s'}
+          ? `<p class="help">${fmt(slugs.length)} platform${slugs.length===1?'':'s'}
              gain a stream route here, each because a named single-machine
              emulator is on this host's app list:</p>
              <table><tbody>${slugs.map(s=>`<tr><td>${esc(s)}</td>
                <td style="color:var(--dim)">${esc(m.platforms[s])}</td></tr>`).join('')}
              </tbody></table>`
-          : `<p class="help">Its app list was read (${(m.apps||[]).length}
+          : `<p class="help">Its app list was read (${fmt((m.apps||[]).length)}
              app${(m.apps||[]).length===1?'':'s'}) and <b>no platform gains a
              route from it</b>. ROMarr only counts an app whose name is an
              emulator for exactly one machine &mdash; PCSX2, Dolphin, flycast.
@@ -3133,7 +3223,7 @@ const moonlightCard=m=>{
     <p class="help">${esc((m.pairing||{}).manual||'')}</p>
     ${canList
       ? (pend.length
-          ? `<p class="help">${pend.length} client${pend.length===1?'':'s'}
+          ? `<p class="help">${fmt(pend.length)} client${pend.length===1?'':'s'}
              waiting:</p>`
           : `<p class="help">No client is waiting to pair right now. Open
              Moonlight, add <code>${esc(m.host||'')}</code>, and select it
@@ -3195,14 +3285,14 @@ const wireMoonlight=m=>{
 // that it had worked.
 const playCard=r=>`<div class="card"><h3>How platforms play here</h3>
   <div class="st">
-    <div><b>${r.local||0}</b><span>In the browser (EmulatorJS)</span></div>
-    <div><b>${r.stream||0}</b><span>Streamed server-side</span></div>
-    <div><b>${r.archive||0}</b><span>On Archive.org</span></div>
-    <div><b>${r.download_only||0}</b><span>Download only</span></div>
+    <div><b>${fmt(r.local||0)}</b><span>In the browser (EmulatorJS)</span></div>
+    <div><b>${fmt(r.stream||0)}</b><span>Streamed server-side</span></div>
+    <div><b>${fmt(r.archive||0)}</b><span>On Archive.org</span></div>
+    <div><b>${fmt(r.download_only||0)}</b><span>Download only</span></div>
   </div>
   <p class="help">Every platform can be downloaded. ${
     (r.download_only||0)>0
-      ? `${r.download_only} have no player on this install &mdash; a stream
+      ? `${fmt(r.download_only)} have no player on this install &mdash; a stream
          server is what plays PS2, GameCube, Wii, Dreamcast and 3DS.`
       : 'Every supported platform also plays here without downloading.'}
     See <a href="#platforms">Platforms</a> for the per-platform answer.</p></div>`;
@@ -3221,7 +3311,7 @@ RENDER.platforms=async()=>{
       <td>${badge(p.media)}</td>
       <td>${(p.play_routes||[]).map(badge).join(' ')}</td>
       <td style="white-space:nowrap">${p.max_size_mb>=1024
-          ? (p.max_size_mb/1024).toFixed(0)+' GB' : p.max_size_mb+' MB'}</td>
+          ? fmt(p.max_size_mb/1024)+' GB' : fmt(p.max_size_mb)+' MB'}</td>
       <td style="color:var(--dim);font-size:12px">${esc((p.extensions||[]).join(' '))}</td>
     </tr>`).join('')}
     </tbody></table></div>`;
@@ -3233,9 +3323,9 @@ RENDER.platforms=async()=>{
 RENDER.blocklist=async()=>{
   const d=await j('/api/v1/blocklist').catch(()=>({items:[]}));
   const items=d.items||[];
-  const when=t=>t?new Date(t*1000).toLocaleString():'—';
+  const when=regionalEpochDateTime;
   $('#page').innerHTML='<div class="card"><h3>Blocklist '
-    +'<span class="help" style="margin-left:8px">'+items.length+'</span></h3>'
+    +'<span class="help" style="margin-left:8px">'+fmt(items.length)+'</span></h3>'
     +'<p class="help">Releases ROMarr will never take again. Each carries the '
     +'reason it was blocked, so lifting one is a decision rather than a guess.</p>'
     +(items.length
@@ -3415,8 +3505,7 @@ RENDER.calendar=async()=>{
     +(d.view!=='upcoming'&&d.month
       ?'<div class="row" style="align-items:center;gap:8px;margin:4px 0 8px">'
         +'<button class="btn ghost" data-calmonth="'+step(-1)+'">‹</button>'
-        +'<b style="font-size:14px">'+esc(d.month_name||'')+' '
-        +esc((d.month||'').slice(0,4))+'</b>'
+        +'<b style="font-size:14px">'+esc(regionalMonth(d.month))+'</b>'
         +'<button class="btn ghost" data-calmonth="'+step(1)+'">›</button>'
         +'<span style="flex:1"></span>'
         +'<span class="help" style="margin:0">'+esc(covLine)+'</span></div>'
@@ -3429,7 +3518,7 @@ RENDER.calendar=async()=>{
         +(x.count?'':'disabled ')
         +'class="'+(x.count?'':'none ')
         +(x.day===d.selected_day?'on':'')+'">'
-        +'<span>'+x.day+'</span>'
+        +'<span>'+fmt(x.day)+'</span>'
         +(x.count?'<b>'+fmt(x.count)+'</b>':'')+'</button>').join('')
       +'</div>'
       +(busiest?'':'<p class="help">Nothing in this month. Page back — a '
@@ -3437,8 +3526,8 @@ RENDER.calendar=async()=>{
       :'')
     +'<h3 style="margin-top:14px">'
     +esc(d.view==='upcoming'?'Releasing soon'
-        :d.view==='releases'?('Released on '+(d.day||''))
-        :((d.view==='added'?'Added ':'Updated ')+(d.day||'')))
+        :d.view==='releases'?('Released on '+regionalDate(d.day))
+        :((d.view==='added'?'Added ':'Updated ')+regionalDate(d.day)))
     +'</h3>'
     +(items.length
       ?'<p class="help">'+fmt(d.items.length)+' from your own library.</p>'
@@ -3446,7 +3535,7 @@ RENDER.calendar=async()=>{
         +'<div class="art" style="background-image:url(\''+esc(g.cover_url||'')+'\')"></div>'
         +'<div class="nm">'+esc(g.title)+'</div>'
         +'<div class="pf">'+esc(g.platform||'')
-        +(g.year?' · '+g.year:'')+(g.rating?' · ★'+g.rating:'')
+        +(g.year?' · '+regionalYear(g.year):'')+(g.rating?' · ★'+num(g.rating):'')
         +'</div></div>').join('')+'</div>'
       :'<div class="empty">'+esc(d.view==='upcoming'
         ?'Nothing dated in the future.'
@@ -3488,7 +3577,7 @@ RENDER.calendar=async()=>{
   $('#cal-web').innerHTML=web.length
     ?'<div class="pgrid">'+web.map((g,n)=>'<div class="pcard">'
       +'<h4>'+esc(g.title)+'</h4>'
-      +'<div class="meta"><span class="pill">'+esc(g.released||'TBA')+'</span>'
+      +'<div class="meta"><span class="pill">'+esc(regionalDate(g.released||'TBA'))+'</span>'
       +(g.upcoming?'<span class="pill" style="background:var(--info);color:#06131f">upcoming</span>':'')
       +'<span class="pill">'+esc(g.source||wsrc)+'</span>'
       +'</div>'
@@ -3562,7 +3651,7 @@ RENDER.getstarted=async()=>{
   platforms.forEach(p=>{const r=(p.play&&p.play.route)||'unknown';
     counts[r]=(counts[r]||0)+1;});
   const routeRow=(k,label,what)=>counts[k]
-    ?'<tr><td><b>'+counts[k]+'</b> platforms</td><td>'+esc(label)+'</td>'
+    ?'<tr><td><b>'+fmt(counts[k])+'</b> platforms</td><td>'+esc(label)+'</td>'
      +'<td class="help" style="margin:0">'+what+'</td></tr>':'';
 
   $('#page').innerHTML=
@@ -3701,8 +3790,8 @@ RENDER.collections=async()=>{
          +'<td style="min-width:150px"><div style="background:var(--bg);'
          +'border:1px solid var(--line);border-radius:4px;height:16px;overflow:hidden">'
          +'<div style="height:100%;width:'+x.percent+'%;background:var(--accent)"></div>'
-         +'</div><span class="help" style="margin:0">'+x.percent+'% — '+esc(x.status)+'</span></td>'
-         +'<td>'+x.done+'</td><td>'+x.failed+'</td><td>'+x.remaining+'</td>'
+         +'</div><span class="help" style="margin:0">'+fmt(x.percent)+'% — '+esc(x.status)+'</span></td>'
+         +'<td>'+fmt(x.done)+'</td><td>'+fmt(x.failed)+'</td><td>'+fmt(x.remaining)+'</td>'
          +'<td class="row" style="gap:6px">'
          +'<button class="btn ghost cstep">Run next</button>'
          +'<button class="btn ghost cact" data-a="'+(x.status==='paused'?'resume':'pause')+'">'
@@ -3770,7 +3859,7 @@ RENDER.collections=async()=>{
     const c=d.counts;
     const tile=(n,label,colour)=>'<div style="flex:1;min-width:110px;padding:10px 12px;'
       +'background:var(--bg);border:1px solid var(--line);border-radius:6px">'
-      +'<div style="font-size:22px;font-weight:600;color:'+colour+'">'+n+'</div>'
+      +'<div style="font-size:22px;font-weight:600;color:'+colour+'">'+fmt(n)+'</div>'
       +'<div class="help" style="margin:0">'+label+'</div></div>';
     out.innerHTML='<div class="row" style="gap:10px;flex-wrap:wrap">'
       +tile(c.expected,'in the set','var(--fg)')
@@ -3783,7 +3872,7 @@ RENDER.collections=async()=>{
       +'<p class="help">'+esc(d.dat)+(d.dat_version?' ('+esc(d.dat_version)+')':'')
       +(d.dat==='TitleDB (Switch)' ? ' — '+esc((d.policy.kinds||[]).join(', '))+(d.policy.latest_only?' · latest listed versions':' · all listed versions') : ' — region order '+esc((d.policy.regions||[]).join(' → ')))
       +(d.policy.region_mode==='strict'?' (strict: titles without a matching-region dump are omitted)':'')+'.</p>'
-      +'<div class="row"><button class="btn" id="cstart">Request '+c.missing
+      +'<div class="row"><button class="btn" id="cstart">Request '+fmt(c.missing)
       +' missing</button>'
       +'<label class="help" style="margin:0">at <input id="cpp" type="number" '
       +'min="1" max="50" value="5" style="width:60px;padding:5px;background:var(--bg);'
@@ -3800,7 +3889,7 @@ RENDER.collections=async()=>{
               :'<span class="pill">present</span>';
         const clones=(t.discarded||[]).length
           ?'<details><summary class="help" style="margin:0;cursor:pointer">'
-           +t.discarded.length+' other dump'+(t.discarded.length>1?'s':'')+'</summary>'
+           +fmt(t.discarded.length)+' other dump'+(t.discarded.length>1?'s':'')+'</summary>'
            +'<ul style="margin:6px 0 0 16px">'+t.discarded.map(x=>
              '<li class="help" style="margin:0">'+esc(x.name)+' — '+esc(x.why)+'</li>').join('')
            +'</ul></details>':'';
@@ -3809,15 +3898,15 @@ RENDER.collections=async()=>{
           +'</td><td>'+pill+'</td><td class="help" style="margin:0">'+esc(t.why)
           +clones+'</td></tr>';
       }).join('')+'</tbody></table>'
-      +(d.titles.length>300?'<p class="help">Showing the first 300 of '
-        +d.titles.length+'.</p>':'');
+      +(d.titles.length>300?'<p class="help">Showing the first '+fmt(300)+' of '
+        +fmt(d.titles.length)+'.</p>':'');
 
     $('#cstart').onclick=async e=>{
       e.target.disabled=true; e.target.textContent='Queueing…';
       const r=await j('/api/v1/collection/start',{method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({...planned, per_pass:parseInt($('#cpp').value,10)||5})});
-      toast(r.error?r.error:('Queued '+(r.queued||0)+' titles'));
+      toast(r.error?r.error:('Queued '+fmt(r.queued||0)+' titles'));
       e.target.disabled=false; e.target.textContent='Request missing';
       drawBatches();
     };
@@ -3889,7 +3978,7 @@ RENDER.manualimport=async()=>{
       +encodeURIComponent($('#mipath').value)).catch(()=>({error:'scan failed'}));
     if(d.error){out.innerHTML='<div class="panel-note panel-warn">'+esc(d.error)+'</div>';return;}
     const c=d.candidates||[];
-    out.innerHTML='<p class="help">'+c.length+' importable, '+(d.skipped||0)+' skipped.</p>'
+    out.innerHTML='<p class="help">'+fmt(c.length)+' importable, '+fmt(d.skipped||0)+' skipped.</p>'
       +(c.length
         ?'<div class="row" style="margin-bottom:10px">'
          +'<button class="btn ghost" id="miall">Import everything verified</button></div>'
@@ -3928,8 +4017,8 @@ RENDER.manualimport=async()=>{
 RENDER.tasks=async()=>{
   const d=await j('/api/v1/system/tasks').catch(()=>({items:[]}));
   const every=s=>!s?'off'
-    :s%3600===0?`every ${s/3600} h`
-    :s%60===0?`every ${s/60} min`:`every ${s} s`;
+    :s%3600===0?`every ${fmt(s/3600)} h`
+    :s%60===0?`every ${fmt(s/60)} min`:`every ${fmt(s)} s`;
   const scheduled=(d.items||[]).map(t=>[t.name,t.label,t]);
   const manualOnly=[['RefreshLibrary','Re-read the library from RomM',null],
     ['Decompress','Batch decompress the library: extract via Compressatorium, '
@@ -3945,7 +4034,7 @@ RENDER.tasks=async()=>{
     ${scheduled.concat(manualOnly).map(([n,label,t])=>`<tr><td><b>${n}</b>
       <div style="color:var(--dim);font-size:12px">${esc(label)}</div></td>
       <td>${t?every(t.interval_seconds):'manual only'}</td>
-      <td style="color:var(--dim)">${t&&t.last_run?esc(t.last_run.replace('T',' ').slice(0,16)):'—'}</td>
+      <td style="color:var(--dim)">${t&&t.last_run?esc(regionalDateTime(t.last_run)):'—'}</td>
       <td style="color:var(--dim);font-size:12px">${
         t&&t.last_error?`<span style="color:var(--warn)">${esc(t.last_error)}</span>`
         :esc((t&&t.last_result)||'—')}</td>
@@ -3962,7 +4051,7 @@ RENDER.tasks=async()=>{
     const r=await j('/api/v1/command',{method:'POST',
       headers:{'content-type':'application/json'},
       body:JSON.stringify(body)});
-    toast(r.message||(r.scanned!==undefined?`Scanned ${r.scanned} (dry run)`:'Done'));
+    toast(r.message||(r.scanned!==undefined?`Scanned ${fmt(r.scanned)} (dry run)`:'Done'));
     go('tasks'); refreshCounts();
   });
 };
@@ -3991,7 +4080,7 @@ RENDER.logs=async()=>{
     if(!rows.length) return;
     const out=$('#lg-out'); if(!out) return;
     out.textContent+=rows.map(r=>
-      `${r.at.replace('T',' ').slice(0,19)}  ${r.level.padEnd(7)} ${r.name}  ${r.message}`)
+      `${regionalDateTime(r.at)}  ${r.level.padEnd(7)} ${r.name}  ${r.message}`)
       .join('\n')+'\n';
     if($('#lg-follow')?.checked) out.scrollTop=out.scrollHeight;
   };
@@ -4038,15 +4127,15 @@ async function refreshCounts(){
     const v=s[b.dataset.ct];
     // null means "not counted yet" -- a dash is honest where 0 would claim
     // the library is empty.
-    b.textContent = v == null ? (b.dataset.ct === 'games' ? '—' : '') : (v || '');
+    b.textContent = v == null ? (b.dataset.ct === 'games' ? '—' : '') : (v ? fmt(v) : '');
     b.style.display = (v == null && b.dataset.ct !== 'games') ? 'none' : '';
     // The games badge is a sum of two unlike things on any library that
     // catalogues entries it does not hold. It stays a sum -- a badge that
     // renumbered itself would read as data loss -- but it no longer keeps
     // that to itself.
     if(b.dataset.ct === 'games' && s.games_catalogued)
-      b.title = `${s.games_on_disk} on disk here · `
-              + `${s.games_catalogued} catalogued elsewhere`;
+      b.title = `${fmt(s.games_on_disk)} on disk here · `
+              + `${fmt(s.games_catalogued)} catalogued elsewhere`;
   });
 }
 (async()=>{

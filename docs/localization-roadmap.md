@@ -34,3 +34,9 @@ The World Bank's 2025 report estimates Mandarin Chinese, Hindi, and Spanish at 1
 ## Translation boundaries and acceptance
 
 Translate interface labels, help, empty states, validation, notifications, and errors. Keep media titles, user names, filenames and paths, commands, API identifiers, protocol values, and other user-supplied content unchanged. Use the selected UI language for date, time, number, and plural formatting. Every locale must fall back to English for a missing key; CI should check placeholder parity and report missing strings. Arabic ships only after the app sets `lang` and `dir`, uses logical layout properties, and verifies the core workflows, login/first-run, and invitation pages in RTL at narrow and desktop widths.
+
+## Implemented in this PR
+
+Settings > General offers a **Date, time, and number format** selector. It defaults to the browser's regional settings and can be set to Spanish, Simplified Chinese, Hindi, German, Japanese, French, Brazilian Portuguese, Arabic, Korean, Traditional Chinese, Vietnamese, or Indonesian. The preference is stored in that browser's local storage; it is not sent to the ROMarr server or shared with other browsers.
+
+The selected region formats visible counts, ratings, scores, file sizes, calendar days and months, and date/time values across the Library, search, wanted list, import lists, sync status, History, live logs, blocklist, tasks, Statistics, collections, friends, and calendar views. Date-only values stay on their original calendar day; month-day anniversary dates are formatted without inventing a year, and year labels retain their source value. Changing the browser preference leaves the current settings form in place. Interface labels and messages remain English. This display preference does not change ROMarr's fan-translation or ROM-language settings, and it does not translate titles, platform names, paths, or other user data.

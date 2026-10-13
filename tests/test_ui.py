@@ -97,3 +97,181 @@ def test_every_rendered_inline_script_parses_as_javascript():
         checked = subprocess.run([node, "--check"], input=script, text=True,
                                  capture_output=True, timeout=15)
         assert checked.returncode == 0, checked.stderr
+
+
+def test_browser_regional_formatting_helpers_and_settings_markup():
+    """Locale selection persists in this browser and drives Intl formatting."""
+    import json
+    import shutil
+    import subprocess
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required to exercise browser formatting helpers")
+
+    html = page()
+    scripts = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)
+    script = next(x for x in scripts if "const REGIONAL_FORMAT_KEY" in x)
+    start = script.index("const esc=")
+    end = script.index("\nlet PLATFORMS=", start)
+    helpers = script[start:end]
+    harness = r"""
+const memory = new Map();
+let storageAvailable = true;
+let storageWritable = true;
+globalThis.localStorage = {
+  getItem: key => {
+    if (!storageAvailable) throw new Error("storage unavailable");
+    return memory.has(key) ? memory.get(key) : null;
+  },
+  setItem: (key, value) => {
+    if (!storageAvailable || !storageWritable) throw new Error("storage unavailable");
+    memory.set(key, String(value));
+  },
+  removeItem: key => {
+    if (!storageAvailable) throw new Error("storage unavailable");
+    memory.delete(key);
+  }
+};
+let refreshCountCalls = 0;
+const refreshCounts = () => { refreshCountCalls += 1; };
+""" + helpers + r"""
+const saved = applyRegionalFormat("de");
+const refreshAfterSave = refreshCountCalls;
+const failedWriteControl = {value: "ja"};
+storageWritable = false;
+const writeFailureHandled = !applyRegionalFormat(failedWriteControl.value, failedWriteControl)
+  && failedWriteControl.value === "de" && getRegionalLocale() === "de"
+  && refreshCountCalls === refreshAfterSave;
+storageWritable = true;
+const number = fmt(1234567.89);
+const date = regionalDate("2026-10-12");
+const leapDay = regionalDate("2024-02-29");
+const invalidIsoDate = regionalDate("2026-02-31");
+const invalidIsoMonth = regionalDate("2026-13-01");
+const anniversary = regionalDate("10-12");
+const invalidAnniversary = regionalDate("02-31");
+const timestamp = regionalDateTime("2026-10-12T00:00:00Z");
+const invalidTimestamp = regionalDateTime("2026-02-31T00:00:00Z");
+const month = regionalMonth("2026-10");
+const invalidMonth = regionalMonth("2026-13");
+const year = regionalYear(2026);
+const unknownYear = regionalYear("not-a-year");
+const selectedMarkup = regionalFormatField();
+const invalidRejected = !applyRegionalFormat("not-a-locale")
+  && getRegionalLocale() === "de" && refreshCountCalls === refreshAfterSave;
+const resetSaved = applyRegionalFormat("system");
+const failedControl = {value: "ja"};
+storageAvailable = false;
+const storageFailureHandled = !applyRegionalFormat(failedControl.value, failedControl)
+  && failedControl.value === "system" && getRegionalLocale() === undefined
+  && refreshCountCalls === 2;
+storageAvailable = true;
+const systemLocale = getRegionalLocale() ?? null;
+const systemMarkup = regionalFormatField();
+const expectedDate = new Intl.DateTimeFormat("de", {
+  timeZone: "UTC"
+}).format(new Date(Date.UTC(2026, 9, 12)));
+const expectedLeapDay = new Intl.DateTimeFormat("de", {
+  timeZone: "UTC"
+}).format(new Date(Date.UTC(2024, 1, 29)));
+const expectedAnniversary = new Intl.DateTimeFormat("de", {
+  month: "short", day: "numeric", timeZone: "UTC"
+}).format(new Date(Date.UTC(2000, 9, 12)));
+const expectedTimestamp = new Date("2026-10-12T00:00:00Z").toLocaleString("de");
+const expectedMonth = new Intl.DateTimeFormat("de", {
+  month: "long", year: "numeric", timeZone: "UTC"
+}).format(new Date(Date.UTC(2026, 9, 1)));
+console.log(JSON.stringify({
+  saved,
+  resetSaved,
+  writeFailureHandled,
+  storageFailureHandled,
+  refreshAfterSave,
+  refreshCountCalls,
+  locale: "de",
+  numberMatches: number === new Intl.NumberFormat("de").format(1234567.89),
+  dateMatches: date === expectedDate,
+  leapDayMatches: leapDay === expectedLeapDay,
+  invalidIsoDatePreserved: invalidIsoDate === "2026-02-31",
+  invalidIsoMonthPreserved: invalidIsoMonth === "2026-13-01",
+  anniversaryMatches: anniversary === expectedAnniversary
+    && !/\b\d{4}\b/.test(anniversary),
+  invalidAnniversaryPreserved: invalidAnniversary === "02-31",
+  timestampMatches: timestamp === expectedTimestamp,
+  invalidTimestampPreserved: invalidTimestamp === "2026-02-31T00:00:00Z",
+  monthMatches: month === expectedMonth,
+  invalidMonthPreserved: invalidMonth === "2026-13",
+  yearMatches: year === new Intl.NumberFormat("de", {useGrouping: false}).format(2026),
+  unknownYearPreserved: unknownYear === "not-a-year",
+  invalidRejected,
+  systemLocale,
+  storedAfterSystemReset: memory.get(REGIONAL_FORMAT_KEY) ?? null,
+  accessible: selectedMarkup.includes('aria-describedby="g-regional-format-help"')
+    && selectedMarkup.includes('id="g-regional-format-help"'),
+  germanOptionSelected: selectedMarkup.includes('value="de" selected'),
+  systemOptionSelected: systemMarkup.includes('value="system" selected')
+}));
+"""
+    checked = subprocess.run(
+        [node, "-e", harness], text=True, capture_output=True, timeout=15
+    )
+    assert checked.returncode == 0, checked.stderr
+    result = json.loads(checked.stdout)
+    assert result["saved"] is True
+    assert result["resetSaved"] is True
+    assert result["writeFailureHandled"]
+    assert result["storageFailureHandled"]
+    assert result["refreshAfterSave"] == 1
+    assert result["refreshCountCalls"] == 2
+    assert result["locale"] == "de"
+    assert result["numberMatches"]
+    assert result["dateMatches"]
+    assert result["leapDayMatches"]
+    assert result["invalidIsoDatePreserved"]
+    assert result["invalidIsoMonthPreserved"]
+    assert result["anniversaryMatches"]
+    assert result["invalidAnniversaryPreserved"]
+    assert result["timestampMatches"]
+    assert result["invalidTimestampPreserved"]
+    assert result["monthMatches"]
+    assert result["invalidMonthPreserved"]
+    assert result["yearMatches"]
+    assert result["unknownYearPreserved"]
+    assert result["invalidRejected"]
+    assert result["systemLocale"] is None
+    assert result["storedAfterSystemReset"] is None
+    assert result["accessible"]
+    assert result["germanOptionSelected"]
+    assert result["systemOptionSelected"]
+
+    # A JavaScript escape here used to render the two characters "\\n"
+    # between the selector and the next setting.
+    assert "regionalFormatField()}" + chr(92) + "n   <div" not in html
+    assert "applyRegionalFormat(regionalFormat.value,regionalFormat);" in html
+
+
+def test_regional_formatting_is_applied_at_dashboard_count_call_sites():
+    """Formatting helpers must reach the visible values that claim to use them."""
+    html = page()
+    assert "if(setRegionalLocale(regionalFormat.value)) refreshCounts();" not in html
+    assert "regionalFormat.onchange=()=>{\n      applyRegionalFormat(regionalFormat.value,regionalFormat);" in html
+    assert "if(setRegionalLocale(regionalFormat.value)) go('general')" not in html
+    assert "★ ${num(x.rating)}" in html
+    assert "Clear ${fmt(failed)} failed" in html
+    assert "<div><b>${fmt(h.platforms)}</b><span>Platforms</span></div>" in html
+    assert "<div><b>${fmt(h.dats||0)}</b><span>DATs loaded</span></div>" in html
+    assert "<div><b>${fmt(h.dat_games||0)}</b><span>Known dumps</span></div>" in html
+    assert "<div><b>${fmt(h.events)}</b><span>History events</span></div>" in html
+    assert "+fmt(x.percent)+'% — '+esc(x.status)" in html
+    assert "+fmt(x.done)+'</td><td>'+fmt(x.failed)+'</td><td>'+fmt(x.remaining)" in html
+    assert ">Page ${fmt(page)} of ${fmt(pages)}</span>" in html
+    assert "${fmt(r.local||0)}" in html
+    assert "${fmt(r.stream||0)}" in html
+    assert "${fmt(r.archive||0)}" in html
+    assert "${fmt(r.download_only||0)}" in html
+    assert "${fmt(Math.max(0,Math.round((r.code_expires_in||0)/60)))} min" in html
+    assert "fmt(p.max_size_mb/1024)+' GB' : fmt(p.max_size_mb)+' MB'" in html
+    assert "${fmt(s/60)} min" in html and "${fmt(s)} s" in html
+    assert "Disabled until ${esc(regionalDateTime(item.disabledUntil))}" in html
