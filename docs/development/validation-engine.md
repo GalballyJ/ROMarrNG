@@ -100,9 +100,11 @@ without `CAP_SYS_PTRACE`; the engine refuses to start a task when that boundary
 cannot be enforced or the runner's original dumpability state cannot be
 restored.
 
-The CI job exports a short-lived receipt from the Linux x64 pytest runner. The
-image job checks its run ID, attempt, commit, runner identity, case count, and
-inventory digest against the image job's own checkout before building an image.
+The CI job exports a short-lived receipt and any receipt-verified failed shard
+logs from the Linux x64 pytest runner. Successful shard logs remain in private
+runner storage. The image job checks the receipt's run ID, attempt, commit,
+runner identity, case count, and inventory digest against the image job's own
+checkout before building an image.
 This confirms the artifact came from the current workflow attempt and the same
 source snapshot; it does not replace the local test evidence.
 

@@ -84,12 +84,22 @@ jobs:
           VALIDATION_RECEIPT_EXPORT: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
         run: python3.13 -m scripts.validation_engine.engine --tests-only
 
-      - name: Retain pytest validation receipt
+      - name: Stage failed pytest task logs
+        if: always()
+        env:
+          PRIVATE_RUNNER_TEMP: ${{ steps.private-runner-temp.outputs.path || runner.temp }}
+          VALIDATION_RECEIPT_EXPORT: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+        run: python3.13 -m scripts.validation_engine.retain_failed_pytest_logs
+
+      - name: Retain pytest validation receipt and failed task logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: romarrng-validation-receipt-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+          name: romarrng-validation-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation-failed-task-logs/manifest.json
+            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation-failed-task-logs/*.log
           if-no-files-found: warn
           retention-days: 7
   validation-environment-portability:
