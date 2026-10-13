@@ -70,7 +70,10 @@ def test_interface_language_choice_survives_storage_failure_for_current_tab():
     if not node:
         pytest.skip("Node.js is required to exercise browser language preferences")
 
-    scripts = re.findall(r"<script[^>]*>(.*?)</script>", page(), re.S)
+    script_tags = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.S | re.IGNORECASE)
+    assert script_tags.findall("<SCRIPT>inline</sCrIpT >") == ["inline"]
+    assert script_tags.findall("<scripture>not inline</scripture>") == []
+    scripts = script_tags.findall(page())
     script = next(x for x in scripts if "const INTERFACE_LANGUAGE_KEY" in x)
     language_helpers = script[
         script.index("const $=s=>document.querySelector(s);") : script.index("const j=")
