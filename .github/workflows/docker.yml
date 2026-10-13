@@ -114,6 +114,9 @@ jobs:
         run: >-
           python -m pytest tests/test_validation_engine.py -q
           -k validation_child_process_environment_is_allowlisted
+      - name: Verify sandbox path policy with native Windows Node
+        if: runner.os == 'Windows'
+        run: node --test scripts/validation_engine/trusted-test-launcher.contract.mjs
 
   acquisition-proof:
     name: Packaged acquisition (${{ matrix.dockerfile }})
