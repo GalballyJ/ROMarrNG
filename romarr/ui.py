@@ -114,8 +114,8 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 ::-webkit-scrollbar-thumb:hover{background:var(--dim);background-clip:padding-box}
 
 /* ---- rail ---- */
-#rail{position:fixed;left:0;top:0;bottom:0;width:222px;background:var(--rail);
-  border-right:1px solid var(--line);z-index:20;
+#rail{position:fixed;inset-inline-start:0;top:0;bottom:0;width:222px;background:var(--rail);
+  border-inline-end:1px solid var(--line);z-index:20;
   display:flex;flex-direction:column;overflow:hidden}
 /* No gap: the brand is one word split into two nodes so that "arr" can
    carry the accent colour, and a flex gap renders it as "ROM arr". */
@@ -136,9 +136,9 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 .nav.on{background:var(--accent-soft);color:var(--accent-text);font-weight:600}
 /* The active marker is a rounded bar rather than *arr's flat 3px border, and
    it lives on a pseudo-element so the row can keep its own radius. */
-.nav.on::before{content:"";position:absolute;left:-6px;top:7px;bottom:7px;
+.nav.on::before{content:"";position:absolute;inset-inline-start:-6px;top:7px;bottom:7px;
   width:3px;border-radius:var(--r-pill);background:var(--accent)}
-.nav .ct{margin-left:auto;font-size:10.5px;font-weight:600;
+.nav .ct{margin-inline-start:auto;font-size:10.5px;font-weight:600;
   background:var(--surface-3);color:var(--dim);padding:1px 7px;
   border-radius:var(--r-pill)}
 /* A zero is written as "" rather than "0", which left an empty pill sitting
@@ -177,7 +177,7 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
   height:calc(100% + 8px);opacity:0;cursor:pointer;border:0;padding:0}
 
 /* ---- main ---- */
-#main{margin-left:222px;min-height:100vh}
+#main{margin-inline-start:222px;min-height:100vh}
 #top{position:sticky;top:0;display:flex;align-items:center;gap:14px;
   padding:13px 26px;z-index:10;border-bottom:1px solid var(--line);
   background:color-mix(in srgb,var(--bg) 80%,transparent);
@@ -207,12 +207,12 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 .chip:hover{border-color:var(--accent-line);color:var(--fg)}
 .chip.on{background:var(--accent);border-color:var(--accent);
   color:var(--accent-ink);font-weight:600}
-.chip .n{opacity:.65;margin-left:5px}
+.chip .n{opacity:.65;margin-inline-start:5px}
 
 /* The scroll the catalogue needs once it is more than a screenful. Bounded
    so the page header and the add-your-own panel stay put while it moves. */
 .cat-scroll{max-height:calc(100vh - 340px);min-height:220px;overflow-y:auto;
-  padding-right:6px;margin-right:-6px}
+  padding-inline-end:6px;margin-inline-end:-6px}
 
 .pgrid{display:grid;gap:12px;
   grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
@@ -222,7 +222,7 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
   transition:border-color var(--t),transform var(--t),box-shadow var(--t)}
 .pcard:hover{border-color:var(--accent-line);transform:translateY(-2px);
   box-shadow:var(--shadow-2)}
-.pcard.installed{border-left:3px solid var(--ok)}
+.pcard.installed{border-inline-start:3px solid var(--ok)}
 .pcard h4{font-size:14px;font-weight:650;display:flex;align-items:center;
   gap:8px;margin:0;letter-spacing:-.01em}
 .pcard .by{color:var(--dim);font-size:11px;font-weight:400}
@@ -230,7 +230,7 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 .pcard .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .pcard .foot{display:flex;gap:8px;align-items:center;
   border-top:1px solid var(--line-soft);padding-top:10px;margin-top:2px}
-.pcard .net{color:var(--dim);font-size:11px;margin-left:auto;text-align:right}
+.pcard .net{color:var(--dim);font-size:11px;margin-inline-start:auto;text-align:end}
 .dot-ok{width:7px;height:7px;border-radius:50%;background:var(--ok);
   display:inline-block;flex:none}
 .dot-off{width:7px;height:7px;border-radius:50%;background:var(--surface-3);
@@ -242,12 +242,12 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
    when it is the third one on the page. */
 .panel-note{background:color-mix(in srgb,var(--info) 11%,transparent);
   border:1px solid color-mix(in srgb,var(--info) 32%,transparent);
-  border-left:3px solid var(--info);border-radius:var(--r-sm);
+  border-inline-start:3px solid var(--info);border-radius:var(--r-sm);
   padding:11px 13px;color:var(--fg-2);font-size:12px;line-height:1.55;
   margin-top:10px}
 .panel-warn{background:color-mix(in srgb,var(--bad) 11%,transparent);
   border-color:color-mix(in srgb,var(--bad) 32%,transparent);
-  border-left-color:var(--bad)}
+  border-inline-start-color:var(--bad)}
 /* Used by Friends and Discover for an inline block of prose. It had no rule
    at all, so it rendered as loose text in the middle of a card. */
 .panel{background:var(--bg);border:1px solid var(--line-soft);
@@ -294,7 +294,7 @@ a:hover{text-decoration:underline;text-underline-offset:2px}
 .card p.help{color:var(--dim);font-size:12.5px;margin:-7px 0 13px}
 .help{color:var(--dim);font-size:12.5px;line-height:1.6}
 table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line-soft);
+th,td{text-align:start;padding:10px 12px;border-bottom:1px solid var(--line-soft);
   vertical-align:top;font-size:13px}
 th{color:var(--dim);font-size:10.5px;font-weight:600;text-transform:uppercase;
   letter-spacing:.07em;background:var(--surface-2)}
@@ -310,7 +310,7 @@ tbody tr:last-child td{border-bottom:0}
   overflow:hidden}
 .mini{padding:4px 12px;font-size:12px;border:1px solid var(--line);
   background:var(--surface);color:var(--fg);border-radius:var(--r-sm);
-  cursor:pointer;margin-left:6px;transition:all var(--t)}
+  cursor:pointer;margin-inline-start:6px;transition:all var(--t)}
 .mini:hover{border-color:var(--accent-line)}
 .mini.accent{background:var(--accent);color:var(--accent-ink);
   border-color:var(--accent)}
@@ -387,7 +387,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent-line);
   line-height:1.2}
 .st span{font-size:11.5px;color:var(--dim)}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;
-  margin-right:7px;background:var(--surface-3)}
+  margin-inline-end:7px;background:var(--surface-3)}
 .dot.up{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
 .dot.down{background:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 22%,transparent)}
 .dot.warn{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 22%,transparent)}
@@ -409,7 +409,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent-line);
 .modal .sub{color:var(--dim);font-size:12.5px;margin-bottom:18px}
 .modal .foot{display:flex;gap:8px;margin-top:20px;align-items:center;
   flex-wrap:wrap}
-.modal .foot .sp{margin-left:auto}
+.modal .foot .sp{margin-inline-start:auto}
 @keyframes fade{from{opacity:0}}
 @keyframes rise{from{opacity:0;transform:translateY(10px) scale(.985)}}
 .btn.danger{background:transparent;color:var(--bad);
@@ -418,7 +418,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent-line);
   filter:none}
 .pick{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .pick button{padding:14px;background:var(--bg);border:1px solid var(--line);
-  color:var(--fg);border-radius:var(--r-md);cursor:pointer;text-align:left;
+  color:var(--fg);border-radius:var(--r-md);cursor:pointer;text-align:start;
   font-family:inherit;font-size:13px;font-weight:600;line-height:1.4;
   transition:all var(--t)}
 .pick button:hover{border-color:var(--accent-line);background:var(--surface-2);
@@ -433,8 +433,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent-line);
   background:var(--accent-softer)}
 .testline{font-size:12.5px;margin-top:10px}
 .testline.ok{color:var(--ok)}.testline.bad{color:var(--bad)}
-.toast{position:fixed;right:22px;bottom:22px;background:var(--surface);
-  border:1px solid var(--line);border-left:3px solid var(--accent);
+.toast{position:fixed;inset-inline-end:22px;bottom:22px;background:var(--surface);
+  border:1px solid var(--line);border-inline-start:3px solid var(--accent);
   border-radius:var(--r-md);padding:13px 17px;max-width:380px;z-index:50;
   font-size:13px;color:var(--fg);box-shadow:var(--shadow-2);
   animation:toastin .22s cubic-bezier(.2,.8,.3,1)}
@@ -452,11 +452,11 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
    column of blank clickable boxes. It gives up width instead. */
 @media(max-width:820px){
   #rail{width:168px}
-  #main{margin-left:168px}
+  #main{margin-inline-start:168px}
   #brand{font-size:17px;padding:14px 13px 13px}
   .navhead{padding:5px 14px}
   .nav{padding:7px 9px;margin:1px 7px;font-size:13px;gap:6px}
-  .nav.on::before{left:-5px}
+  .nav.on::before{inset-inline-start:-5px}
   #top{padding:11px 14px}
   .page{padding:16px 14px 40px}
   #railfoot{padding:10px 9px 12px}
@@ -468,7 +468,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 @media(max-width:540px){
   #rail{width:138px}
-  #main{margin-left:138px}
+  #main{margin-inline-start:138px}
   #brand{font-size:15px;padding:13px 10px 12px}
   .nav{padding:7px 8px;margin:1px 5px;font-size:12.5px}
   .thm-modes{flex-direction:column;gap:2px}
@@ -626,7 +626,7 @@ def _theme_control_html() -> str:
         for code, label in [
             ('en', 'English'), ('es', 'Español — Spanish'), ('zh-Hans', '简体中文 — Simplified Chinese'), ('hi', 'हिन्दी — Hindi'),
             ('de', 'Deutsch — German'), ('ja', '日本語 — Japanese'), ('fr', 'Français — French'), ('pt-BR', 'Português (Brasil) — Brazilian Portuguese'),
-            ('ko', '한국어 — Korean'), ('zh-Hant', '繁體中文 — Traditional Chinese'), ('vi', 'Tiếng Việt — Vietnamese'), ('id', 'Bahasa Indonesia — Indonesian'),
+            ('ar', 'العربية — Arabic'), ('ko', '한국어 — Korean'), ('zh-Hant', '繁體中文 — Traditional Chinese'), ('vi', 'Tiếng Việt — Vietnamese'), ('id', 'Bahasa Indonesia — Indonesian'),
         ]
     )
     return (
@@ -692,7 +692,7 @@ JS = r"""
 const UI_LABELS=__UI_LABELS__;
 const $=s=>document.querySelector(s);
 const INTERFACE_LANGUAGE_KEY='romarrng.interface-language';
-const INTERFACE_LANGUAGES=['en','es','zh-Hans','hi','de','ja','fr','pt-BR','ko','zh-Hant','vi','id'];
+const INTERFACE_LANGUAGES=['en','es','zh-Hans','hi','de','ja','fr','pt-BR','ar','ko','zh-Hant','vi','id'];
 const browserInterfaceLanguage=()=>{
   for(const candidate of (navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language])){
     const normalized=String(candidate||'').toLowerCase(), base=normalized.split(/[-_]/)[0];
@@ -706,10 +706,12 @@ const readInterfaceLanguage=()=>{
   try{const value=localStorage.getItem(INTERFACE_LANGUAGE_KEY);return INTERFACE_LANGUAGES.includes(value)?value:browserInterfaceLanguage();}
   catch(_){return browserInterfaceLanguage();}
 };
+const translateLabel=(source,language)=>UI_LABELS[source]?.[language]||source;
 const applyTranslatedLabel=(el,language)=>{
   const source=el.dataset.i18n, translated=UI_LABELS[source]?.[language];
-  el.textContent=translated||source;
+  el.textContent=translateLabel(source,language);
   el.lang=translated?language:'en';
+  el.dir=translated&&language==='ar'?'rtl':'ltr';
 };
 const applyInterfaceLanguage=(language=readInterfaceLanguage())=>{
   document.documentElement.lang='en';
@@ -724,20 +726,32 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>
 // glance instead of a digit-counting exercise.
 const REGIONAL_FORMAT_KEY='romarrng.regional-format';
 const REGIONAL_FORMATS=[["system", "Use browser settings"], ["es", "Español — Spanish"], ["zh-CN", "简体中文 — Chinese (Simplified)"], ["hi-IN", "हिन्दी — Hindi"], ["de", "Deutsch — German"], ["ja", "日本語 — Japanese"], ["fr", "Français — French"], ["pt-BR", "Português (Brasil) — Brazilian Portuguese"], ["ar", "العربية — Arabic"], ["ko", "한국어 — Korean"], ["zh-TW", "繁體中文 — Chinese (Traditional)"], ["vi", "Tiếng Việt — Vietnamese"], ["id", "Bahasa Indonesia — Indonesian"]];
-const getRegionalLocale=()=>{
+const readRegionalPreference=()=>{
   try{
     const value=localStorage.getItem(REGIONAL_FORMAT_KEY);
-    return REGIONAL_FORMATS.some(([code])=>code===value)&&value!=='system'?value:undefined;
-  }catch(_){return undefined;}
+    return REGIONAL_FORMATS.some(([code])=>code===value)?value:'system';
+  }catch(_){return 'system';}
 };
+let activeRegionalPreference=readRegionalPreference();
+const getRegionalLocale=()=>activeRegionalPreference==='system'?undefined:activeRegionalPreference;
 const setRegionalLocale=value=>{
   if(!REGIONAL_FORMATS.some(([code])=>code===value)) return false;
+  activeRegionalPreference=value;
   try{
     if(value==='system') localStorage.removeItem(REGIONAL_FORMAT_KEY);
     else localStorage.setItem(REGIONAL_FORMAT_KEY,value);
-    return true;
-  }catch(_){return false;}
+  }catch(_){
+    // Keep the chosen format active in this tab when browser storage is unavailable.
+  }
+  return true;
 };
+if(typeof window!=='undefined'){
+  window.addEventListener('storage',event=>{
+    if(event.key!==REGIONAL_FORMAT_KEY&&event.key!==null) return;
+    activeRegionalPreference=readRegionalPreference();
+    refreshCounts();
+  });
+}
 const applyRegionalFormat=(value,control)=>{
   if(!setRegionalLocale(value)){
     if(control) control.value=getRegionalLocale()||'system';
@@ -747,13 +761,21 @@ const applyRegionalFormat=(value,control)=>{
   return true;
 };
 const regionalFormatField=()=>{
-  let current='system';
-  try{current=localStorage.getItem(REGIONAL_FORMAT_KEY)||'system';}catch(_){}
-  if(!REGIONAL_FORMATS.some(([code])=>code===current)) current='system';
-  const options=REGIONAL_FORMATS.map(([code,label])=>'<option value="'+esc(code)+'"'+(code===current?' selected':'')+'>'+esc(label)+'</option>').join('');
-  return '<div class="field"><label for="g-regional-format">Date, time, and number format</label>'+
+  const current=readRegionalPreference();
+  const language=readInterfaceLanguage();
+  const metadata=(source)=>{
+    const translated=Boolean(UI_LABELS[source]?.[language]);
+    return ' lang="'+(translated?language:'en')+'" dir="'+(translated&&language==='ar'?'rtl':'ltr')+'"';
+  };
+  const options=REGIONAL_FORMATS.map(([code,label])=>{
+    const text=code==='system'?translateLabel(label,language):label;
+    return '<option value="'+esc(code)+'"'+(code===current?' selected':'')+'>'+esc(text)+'</option>';
+  }).join('');
+  const formatLabel='Date, time, and number format';
+  const formatHelp='This changes date and number formats only; it is separate from interface language.';
+  return '<div class="field"><label for="g-regional-format" data-i18n="'+formatLabel+'"'+metadata(formatLabel)+'>'+esc(translateLabel(formatLabel,language))+'</label>'+
     '<select id="g-regional-format" aria-describedby="g-regional-format-help">'+options+'</select>'+
-    '<div id="g-regional-format-help" style="color:var(--dim);font-size:11.5px;margin-top:4px">This changes date and number formats only; it is separate from interface language.</div></div>';
+    '<div id="g-regional-format-help" data-i18n="'+formatHelp+'"'+metadata(formatHelp)+' style="color:var(--dim);font-size:11.5px;margin-top:4px">'+esc(translateLabel(formatHelp,language))+'</div></div>';
 };
 const fmt=n=>Number(n??0).toLocaleString(getRegionalLocale());
 const num=n=>n===null||n===undefined?'—':fmt(n);
@@ -852,7 +874,7 @@ RENDER.hub=async()=>{
   const confined=hs.sandboxed===true;
   const sandboxNote=hs.available===false ? '' :
     (confined
-      ? '<div class="panel-note" style="border-left:3px solid var(--ok)">'
+      ? '<div class="panel-note" style="border-inline-start:3px solid var(--ok)">'
         +'<b>Plugins run confined.</b> Each runs as its own subprocess with no '
         +'library token or sockets of its own. Landlock limits file access to '
         +'plugin code, verified assets and runtime files; writes stay in bounded '
@@ -869,7 +891,7 @@ RENDER.hub=async()=>{
   const acq=hs.acquisition||'';
   const acqNote=hs.available===false ? '' :
     (acq==='ready'
-      ? '<div class="panel-note" style="border-left:3px solid var(--ok)">'
+      ? '<div class="panel-note" style="border-inline-start:3px solid var(--ok)">'
         +'<b>Enabled plugins join search.</b> Every enabled plugin that '
         +'declares <span class="pill">search</span> answers Interactive '
         +'Search alongside your indexers ('
@@ -925,7 +947,7 @@ RENDER.hub=async()=>{
       +esc(name)+'<span class="n">'+fmt(n)+'</span></span>').join('');
 
     p.innerHTML=sandboxNote+acqNote+'<div class="card"><h3>Plugins'
-      +'<span class="help" style="margin-left:10px">'+fmt(items.length)+' of '+fmt(d.total||0)+'</span></h3>'
+      +'<span class="help" style="margin-inline-start:10px">'+fmt(items.length)+' of '+fmt(d.total||0)+'</span></h3>'
       +'<div class="cat-bar">'
       +'<input id="pq" placeholder="Search plugins by name, author or description…" value="'+esc(q)+'">'
       +'<span class="chip'+(inst==='1'?' on':'')+'" data-inst="1">Installed</span>'
@@ -1413,7 +1435,7 @@ RENDER.lists=async()=>{
             ${l.last_sync.error?esc(l.last_sync.error.slice(0,90))
               :`fetched ${fmt(l.last_sync.fetched)} at ${esc(regionalDateTime(l.last_sync.at))}`}</div>`:''}</td>
         <td><span class="dot ${l.enable!==false?'up':'down'}"></span></td>
-        <td style="text-align:right"><div class="rowact">
+        <td style="text-align:end"><div class="rowact">
           <button data-ledit="${i}">Edit</button></div></td></tr>`).join('')}
       </tbody></table>`
       :'<div class="empty">No lists yet. Paste one, or connect an account, and let the clock do the asking.</div>'}
@@ -1857,7 +1879,7 @@ RENDER.peers=async()=>{
           p.delegate_users?' <span class="pill">their users too</span>':''}</td>
         <td>${p.confirmed?'<span class="pill imported">confirmed</span>'
           :'<span class="pill failed">awaiting your confirmation</span>'}</td>
-        <td style="text-align:right"><div class="rowact">
+        <td style="text-align:end"><div class="rowact">
           ${p.confirmed?`<button data-pbrowse="${esc(p.peer_id)}"${
              p.url?'':' disabled title="Their invitation carried no address, '
                      +'so there is nowhere to call. Ask them to set their '
@@ -2150,7 +2172,7 @@ async function friendShelf(peerId, opts){
         <td>${esc(g.platform||'')}</td>
         <td>${g.year?regionalYear(g.year):''}</td>
         <td>${g.verified?'<span class="pill imported">verified</span>':''}</td>
-        <td style="text-align:right"><div class="rowact">
+        <td style="text-align:end"><div class="rowact">
           <button data-fwant="${esc(g.title||'')}"
             data-fplat="${esc(g.platform||'')}">Add to Wanted</button>
           <button data-fplay="${esc(g.title||'')}"
@@ -2305,7 +2327,7 @@ RENDER.stats=async()=>{
     if(!rows.length) return '<div class="empty">Nothing yet.</div>';
     const max=Math.max(...rows.map(([,v])=>v));
     return rows.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
-      <span style="width:180px;color:var(--dim);font-size:12.5px;text-align:right">${esc(k)}</span>
+      <span style="width:180px;color:var(--dim);font-size:12.5px;text-align:end">${esc(k)}</span>
       <div style="flex:1;background:var(--line);border-radius:3px;height:14px">
         <div style="width:${Math.max(4,Math.round(v/max*100))}%;height:14px;
           background:var(--accent);border-radius:3px"></div></div>
@@ -2411,7 +2433,7 @@ RENDER.queue=async()=>{
       <td>${esc(i.release||'—')}</td><td>${num(i.seeders)}</td>
       <td><span class="pill ${esc(i.state)}">${esc(i.state)}</span>
       ${i.detail?`<div style="color:var(--dim);font-size:11.5px">${esc(i.detail)}</div>`:''}
-      </td><td style="text-align:right"><div class="rowact">
+      </td><td style="text-align:end"><div class="rowact">
         ${i.state==='failed'?`<button data-qretry="${n}">Retry</button>`:''}
         <button data-qremove="${n}">Remove</button></div></td></tr>`).join('')}
       </tbody></table>`
@@ -2727,7 +2749,7 @@ RENDER.clients=async()=>{
   $('#page').innerHTML=`<div class="card">
     <div class="row" style="margin-bottom:12px">
       <h3 style="margin:0">Download Clients</h3>
-      <button class="btn sp" id="c-add" style="margin-left:auto">Add</button>
+      <button class="btn sp" id="c-add" style="margin-inline-start:auto">Add</button>
     </div>
     <p class="help">A release is routed by its protocol, so an indexer type
       with no client configured cannot be grabbed at all &mdash; which is why
@@ -2787,7 +2809,7 @@ RENDER.libraries=async()=>{
   $('#page').innerHTML=`<div class="card">
     <div class="row" style="margin-bottom:12px">
       <h3 style="margin:0">Libraries</h3>
-      <button class="btn sp" id="l-add" style="margin-left:auto">Add</button>
+      <button class="btn sp" id="l-add" style="margin-inline-start:auto">Add</button>
     </div>
     <p class="help">Where finished ROMs are filed. Add more than one to send
       some platforms elsewhere &mdash; a platform rule wins over the default,
@@ -2830,7 +2852,7 @@ RENDER.indexers=async()=>{
   $('#page').innerHTML=`<div class="card">
     <div class="row" style="margin-bottom:12px">
       <h3 style="margin:0">Indexers</h3>
-      <button class="btn" id="i-add" style="margin-left:auto">Add</button>
+      <button class="btn" id="i-add" style="margin-inline-start:auto">Add</button>
     </div>
     <p class="help">Add a Newznab or Torznab indexer directly, or point at
       Prowlarr and use everything it already has configured.</p>
@@ -3369,7 +3391,7 @@ RENDER.blocklist=async()=>{
   const items=d.items||[];
   const when=regionalEpochDateTime;
   $('#page').innerHTML='<div class="card"><h3>Blocklist '
-    +'<span class="help" style="margin-left:8px">'+fmt(items.length)+'</span></h3>'
+    +'<span class="help" style="margin-inline-start:8px">'+fmt(items.length)+'</span></h3>'
     +'<p class="help">Releases ROMarr will never take again. Each carries the '
     +'reason it was blocked, so lifting one is a decision rather than a guess.</p>'
     +(items.length
@@ -3407,7 +3429,7 @@ RENDER.connections=async()=>{
        +have.map((c,i)=>'<tr><td><b>'+esc(c.name||c.type)+'</b></td>'
          +'<td><span class="pill">'+esc(c.type)+'</span></td>'
          +'<td>'+esc((c.events||['all']).join(', '))+'</td>'
-         +'<td style="text-align:right"><div class="rowact">'
+         +'<td style="text-align:end"><div class="rowact">'
          +'<button data-cedit="'+i+'">Edit</button></div></td></tr>').join('')
        +'</tbody></table>'
       :'<div class="empty-cat"><b>No connections yet</b>Add one — this is '
@@ -3456,7 +3478,7 @@ RENDER.metadata=async()=>{
         +mine.items.map((m,i)=>'<tr><td><b>'+esc(m.name||m.type)+'</b></td>'
           +'<td>'+esc(m.type)+'</td>'
           +'<td><span class="dot '+(m.enable!==false?'up':'down')+'"></span></td>'
-          +'<td style="text-align:right"><div class="rowact">'
+          +'<td style="text-align:end"><div class="rowact">'
           +'<button data-mpedit="'+i+'">Edit</button></div></td></tr>').join('')
         +'</tbody></table>'
       :'<div class="empty">No provider configured yet — covers, Discover and '
@@ -4082,7 +4104,7 @@ RENDER.tasks=async()=>{
       <td style="color:var(--dim);font-size:12px">${
         t&&t.last_error?`<span style="color:var(--warn)">${esc(t.last_error)}</span>`
         :esc((t&&t.last_result)||'—')}</td>
-      <td style="text-align:right"><button class="btn ghost" data-task="${n}">Run</button></td>
+      <td style="text-align:end"><button class="btn ghost" data-task="${n}">Run</button></td>
       </tr>`).join('')}</tbody></table></div>`;
   document.querySelectorAll('[data-task]').forEach(b=>b.onclick=async()=>{
     b.disabled=true; b.textContent='Running…';
@@ -4270,7 +4292,7 @@ body{display:flex;align-items:center;justify-content:center;min-height:100vh;
 .box button:hover{filter:brightness(1.07);box-shadow:var(--shadow-1)}
 .box button:disabled{opacity:.6;cursor:default;filter:none}
 .note{margin-top:20px;padding:12px 14px;background:var(--bg);
-  border:1px solid var(--line-soft);border-left:3px solid var(--info);
+  border:1px solid var(--line-soft);border-inline-start:3px solid var(--info);
   border-radius:var(--r-sm);color:var(--dim);font-size:12px;line-height:1.65}
 .err{margin-top:16px;padding:11px 13px;border-radius:var(--r-sm);font-size:13px;
   background:color-mix(in srgb,var(--bad) 14%,transparent);

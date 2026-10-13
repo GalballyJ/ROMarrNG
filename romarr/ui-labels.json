@@ -1384,5 +1384,33 @@
     "zh-Hant": "目前僅翻譯導覽和語言設定；其他大多數畫面仍為英文。",
     "vi": "Hiện bản dịch chỉ bao gồm điều hướng và cài đặt ngôn ngữ; hầu hết màn hình khác vẫn bằng tiếng Anh.",
     "id": "Saat ini, terjemahan mencakup navigasi dan pengaturan bahasa; sebagian besar layar lainnya masih berbahasa Inggris."
+  },
+  "This changes date and number formats only; it is separate from interface language.": {
+    "es": "Esto solo cambia los formatos de fecha y número; es independiente del idioma de la interfaz.",
+    "zh-Hans": "此选项仅更改日期和数字格式，与界面语言分开。",
+    "hi": "यह केवल तारीख और संख्या के प्रारूप बदलता है; इंटरफ़ेस भाषा इससे अलग रहती है।",
+    "de": "Dies ändert nur Datums- und Zahlenformate und ist unabhängig von der Oberflächensprache.",
+    "ja": "日付と数値の形式のみを変更します。インターフェースの言語とは別の設定です。",
+    "fr": "Ce réglage modifie uniquement les formats de date et de nombre, indépendamment de la langue de l’interface.",
+    "pt-BR": "Esta opção altera apenas os formatos de data e número; ela é independente do idioma da interface.",
+    "ar": "يغيّر هذا تنسيقات التاريخ والأرقام فقط، بشكل مستقل عن لغة الواجهة.",
+    "ko": "날짜와 숫자 형식만 변경하며 인터페이스 언어와는 별개입니다.",
+    "zh-Hant": "此選項僅變更日期與數字格式，與介面語言分開設定。",
+    "vi": "Tùy chọn này chỉ thay đổi định dạng ngày và số, độc lập với ngôn ngữ giao diện.",
+    "id": "Pengaturan ini hanya mengubah format tanggal dan angka, terpisah dari bahasa antarmuka."
+  },
+  "Use browser settings": {
+    "es": "Usar la configuración del navegador",
+    "zh-Hans": "使用浏览器设置",
+    "hi": "ब्राउज़र सेटिंग्स का उपयोग करें",
+    "de": "Browsereinstellungen verwenden",
+    "ja": "ブラウザーの設定を使用",
+    "fr": "Utiliser les paramètres du navigateur",
+    "pt-BR": "Usar as configurações do navegador",
+    "ar": "استخدام إعدادات المتصفح",
+    "ko": "브라우저 설정 사용",
+    "zh-Hant": "使用瀏覽器設定",
+    "vi": "Dùng cài đặt trình duyệt",
+    "id": "Gunakan setelan browser"
   }
 }
