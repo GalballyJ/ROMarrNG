@@ -1,7 +1,7 @@
 ---
 category: security
 audience: operators
-area: ci-security
+area: credentials
 action: none
 breaking: false
 ---
