@@ -33,6 +33,22 @@ def test_the_document_title_is_the_product_name():
     assert re.search(r"<title>ROMarr</title>", page())
 
 
+def test_interface_language_name_is_localized_and_fallback_content_stays_english():
+    html = page()
+    selector = re.search(
+        r'<label[^>]*for="interface-language"[^>]*>.*?</label>\s*'
+        r'(<select id="interface-language"[^>]*>.*?</select>)',
+        html,
+        re.S,
+    )
+    assert selector, "the language picker needs its visible associated label"
+    assert 'aria-label="Interface language"' not in selector.group(1)
+    assert 'value="ar"' not in selector.group(1)
+    assert '<html lang="en">' in html
+    assert "document.documentElement.lang='en'" in html
+    assert "el.lang=translated?language:'en'" in html
+
+
 def test_the_libraries_page_is_in_the_nav_and_rendered():
     """A feature configured only by hand-editing settings.json is not one most
     people can use."""

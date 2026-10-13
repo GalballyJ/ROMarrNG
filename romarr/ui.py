@@ -626,13 +626,13 @@ def _theme_control_html() -> str:
         for code, label in [
             ('en', 'English'), ('es', 'Español — Spanish'), ('zh-Hans', '简体中文 — Simplified Chinese'), ('hi', 'हिन्दी — Hindi'),
             ('de', 'Deutsch — German'), ('ja', '日本語 — Japanese'), ('fr', 'Français — French'), ('pt-BR', 'Português (Brasil) — Brazilian Portuguese'),
-            ('ar', 'العربية — Arabic'), ('ko', '한국어 — Korean'), ('zh-Hant', '繁體中文 — Traditional Chinese'), ('vi', 'Tiếng Việt — Vietnamese'), ('id', 'Bahasa Indonesia — Indonesian'),
+            ('ko', '한국어 — Korean'), ('zh-Hant', '繁體中文 — Traditional Chinese'), ('vi', 'Tiếng Việt — Vietnamese'), ('id', 'Bahasa Indonesia — Indonesian'),
         ]
     )
     return (
         '<div id="railfoot">'
         '<label class="thm-lbl" for="interface-language" data-i18n="Interface language">Interface language</label>'
-        f'<select id="interface-language" aria-label="Interface language" style="width:100%;margin:0 0 10px;padding:7px 8px;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:7px">{language_options}</select>'
+        f'<select id="interface-language" style="width:100%;margin:0 0 10px;padding:7px 8px;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:7px">{language_options}</select>'
         '<div class="thm-lbl">Theme</div>'
         '<div class="thm-modes" role="group" aria-label="Colour mode">'
         '<button class="thm" type="button" data-theme-set="dark" '
@@ -692,7 +692,7 @@ JS = r"""
 const UI_LABELS=__UI_LABELS__;
 const $=s=>document.querySelector(s);
 const INTERFACE_LANGUAGE_KEY='romarrng.interface-language';
-const INTERFACE_LANGUAGES=['en','es','zh-Hans','hi','de','ja','fr','pt-BR','ar','ko','zh-Hant','vi','id'];
+const INTERFACE_LANGUAGES=['en','es','zh-Hans','hi','de','ja','fr','pt-BR','ko','zh-Hant','vi','id'];
 const browserInterfaceLanguage=()=>{
   for(const candidate of (navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language])){
     const normalized=String(candidate||'').toLowerCase(), base=normalized.split(/[-_]/)[0];
@@ -706,13 +706,16 @@ const readInterfaceLanguage=()=>{
   try{const value=localStorage.getItem(INTERFACE_LANGUAGE_KEY);return INTERFACE_LANGUAGES.includes(value)?value:browserInterfaceLanguage();}
   catch(_){return browserInterfaceLanguage();}
 };
-const translateLabel=(source,language)=>UI_LABELS[source]?.[language]||source;
+const applyTranslatedLabel=(el,language)=>{
+  const source=el.dataset.i18n, translated=UI_LABELS[source]?.[language];
+  el.textContent=translated||source;
+  el.lang=translated?language:'en';
+};
 const applyInterfaceLanguage=(language=readInterfaceLanguage())=>{
-  document.documentElement.lang=language;
-  document.documentElement.dir=language==='ar'?'rtl':'ltr';
-  document.querySelectorAll('[data-i18n]').forEach(el=>{el.textContent=translateLabel(el.dataset.i18n,language);});
+  document.documentElement.lang='en';
+  document.documentElement.dir='ltr';
+  document.querySelectorAll('[data-i18n]').forEach(el=>applyTranslatedLabel(el,language));
   const selector=$('#interface-language'); if(selector) selector.value=language;
-  const title=$('#top h1'); if(title&&title.dataset.i18n) title.textContent=translateLabel(title.dataset.i18n,language);
 };
 const j=(u,o)=>fetch(u,o).then(r=>r.json());
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>
@@ -833,7 +836,7 @@ function go(page){
     hub:'ROM Hub — Plugins'};
   const title=$('#top h1');
   title.dataset.i18n=titles[page]||'ROMarr';
-  title.textContent=translateLabel(title.dataset.i18n,readInterfaceLanguage());
+  applyTranslatedLabel(title,readInterfaceLanguage());
   $('#search').classList.toggle('hide', !['library','add'].includes(page));
   (RENDER[page]||RENDER.library)();
 }
