@@ -494,7 +494,9 @@ def command_prepare(arguments: argparse.Namespace) -> int:
 
 def command_check_changelog_tags(_: argparse.Namespace) -> int:
     tags = []
-    for tag in git("tag", "--sort=version:refname", "--list", "v[0-9]*").splitlines():
+    for tag in git(
+        "tag", "--sort=version:refname", "--merged", "HEAD", "--list", "v[0-9]*"
+    ).splitlines():
         match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
         if match and tuple(map(int, match.groups())) >= FIRST_PUBLISHED_RELEASE:
             tags.append(tag)
@@ -568,7 +570,10 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--output", default="/tmp/romarrng-release-section.md")
     prepare.set_defaults(handler=command_prepare)
 
-    tags = commands.add_parser("check-changelog-tags", help="ensure every stable tag has one section")
+    tags = commands.add_parser(
+        "check-changelog-tags",
+        help="ensure every stable tag merged into HEAD has one changelog section",
+    )
     tags.set_defaults(handler=command_check_changelog_tags)
 
     split = commands.add_parser("split-discord", help="split stdin or a file into Discord-sized chunks")
