@@ -83,6 +83,7 @@ def test_interface_language_choice_survives_storage_failure_for_current_tab():
     harness = r"""
 let changeLanguage, syncLanguage;
 let storedLanguage = null;
+let storageWritable = false;
 const selector = {
   value: "en",
   addEventListener: (_name, handler) => { changeLanguage = handler; }
@@ -90,7 +91,10 @@ const selector = {
 globalThis.navigator = {languages: ["en"], language: "en"};
 globalThis.localStorage = {
   getItem: () => storedLanguage,
-  setItem: () => { throw new Error("storage unavailable"); }
+  setItem: (_key, value) => {
+    if (!storageWritable) throw new Error("storage unavailable");
+    storedLanguage = String(value);
+  }
 };
 globalThis.window = {
   addEventListener: (_name, handler) => { syncLanguage = handler; }
@@ -105,15 +109,23 @@ selector.value = "de";
 changeLanguage();
 applyInterfaceLanguage();
 const storageFailureChoice = readInterfaceLanguage();
+storageWritable = true;
+selector.value = "es";
+changeLanguage();
+const successfulWriteChoice = readInterfaceLanguage();
+storedLanguage = null;
+syncLanguage({key: null, newValue: null});
+const clearFallback = readInterfaceLanguage();
+const selectedAfterClear = selector.value;
 storedLanguage = "fr";
 syncLanguage({key: INTERFACE_LANGUAGE_KEY, newValue: storedLanguage});
 const crossTabLanguage = readInterfaceLanguage();
-storedLanguage = null;
-syncLanguage({key: null, newValue: null});
 console.log(JSON.stringify({
   storageFailureChoice,
+  successfulWriteChoice,
   crossTabLanguage,
-  clearFallback: readInterfaceLanguage(),
+  clearFallback,
+  selectedAfterClear,
   selected: selector.value
 }));
 """
@@ -122,8 +134,11 @@ console.log(JSON.stringify({
     )
     assert result.returncode == 0, result.stderr
     assert '"storageFailureChoice":"de"' in result.stdout
+    assert '"successfulWriteChoice":"es"' in result.stdout
     assert '"crossTabLanguage":"fr"' in result.stdout
-    assert '"clearFallback":"en","selected":"en"' in result.stdout
+    assert '"clearFallback":"en"' in result.stdout
+    assert '"selectedAfterClear":"en"' in result.stdout
+    assert '"selected":"fr"' in result.stdout
 
 
 def test_the_libraries_page_is_in_the_nav_and_rendered():
