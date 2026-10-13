@@ -1,13 +1,49 @@
 """The rendered page, as a browser reads it rather than as the source spells it."""
 
 import re
+from html.parser import HTMLParser
 
 from romarr.ui import page
+
+
+class _InlineScriptParser(HTMLParser):
+    """Collect script contents with the browser-tolerant HTML parser."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.scripts: list[str] = []
+        self._current_script: list[str] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "script":
+            self._current_script = []
+
+    def handle_data(self, data):
+        if self._current_script is not None:
+            self._current_script.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "script" and self._current_script is not None:
+            self.scripts.append("".join(self._current_script))
+            self._current_script = None
+
+
+def _inline_scripts(html: str) -> list[str]:
+    parser = _InlineScriptParser()
+    parser.feed(html)
+    parser.close()
+    return parser.scripts
 
 
 def _text(html: str) -> str:
     """Tags stripped -- what a reader actually sees."""
     return re.sub(r"<[^>]+>", "", html)
+
+
+def test_inline_script_extraction_handles_browser_tolerated_end_tags():
+    assert _inline_scripts("<SCRIPT>inline</sCrIpT >") == ["inline"]
+    assert _inline_scripts("<script>inline</script\t\n bar>") == ["inline"]
+    assert _inline_scripts("<scripture>not inline</scripture>") == []
 
 
 def test_the_brand_reads_romarr():
@@ -31,6 +67,114 @@ def test_the_old_name_appears_nowhere_a_user_can_read_it():
 
 def test_the_document_title_is_the_product_name():
     assert re.search(r"<title>ROMarr</title>", page())
+
+
+def test_interface_language_name_is_localized_and_fallback_content_stays_english():
+    html = page()
+    selector = re.search(
+        r'<label[^>]*for="interface-language"[^>]*>.*?</label>\s*'
+        r'(<select id="interface-language"[^>]*>.*?</select>)',
+        html,
+        re.S,
+    )
+    assert selector, "the language picker needs its visible associated label"
+    assert 'aria-label="Interface language"' not in selector.group(1)
+    assert 'value="ar"' not in selector.group(1)
+    assert '<html lang="en">' in html
+    assert "document.documentElement.lang='en'" in html
+    assert "el.lang=translated?language:'en'" in html
+
+
+def test_library_and_search_labels_cover_selectable_interface_languages():
+    from romarr.ui import UI_LABELS
+
+    html = page()
+    selector = re.search(r'<select id="interface-language"[^>]*>(.*?)</select>', html, re.S)
+    assert selector
+    selectable = set(re.findall(r'<option value="([^"]+)"', selector.group(1))) - {"en"}
+    for label in ("On disk & catalogued", "Any source", "Enter a game name"):
+        assert selectable <= UI_LABELS[label].keys(), f"{label} is missing translations"
+    assert "if(!game){toast(translateLabel('Enter a game name',readInterfaceLanguage()));return;}" in html
+
+
+def test_interface_language_choice_survives_storage_failure_for_current_tab():
+    import shutil
+    import subprocess
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required to exercise browser language preferences")
+
+    scripts = _inline_scripts(page())
+    script = next(x for x in scripts if "const INTERFACE_LANGUAGE_KEY" in x)
+    language_helpers = script[
+        script.index("const $=s=>document.querySelector(s);") : script.index("const j=")
+    ]
+    change_handler = script[
+        script.index("const languageSelect=$('#interface-language');") : script.index(
+            "  bindTheme();"
+        )
+    ]
+    harness = r"""
+let changeLanguage, syncLanguage;
+let storedLanguage = null;
+let storageWritable = false;
+const selector = {
+  value: "en",
+  addEventListener: (_name, handler) => { changeLanguage = handler; }
+};
+globalThis.navigator = {languages: ["en"], language: "en"};
+globalThis.localStorage = {
+  getItem: () => storedLanguage,
+  setItem: (_key, value) => {
+    if (!storageWritable) throw new Error("storage unavailable");
+    storedLanguage = String(value);
+  }
+};
+globalThis.window = {
+  addEventListener: (_name, handler) => { syncLanguage = handler; }
+};
+globalThis.document = {
+  documentElement: {},
+  querySelector: name => name === "#interface-language" ? selector : null,
+  querySelectorAll: () => []
+};
+""" + language_helpers + change_handler + r"""
+selector.value = "de";
+changeLanguage();
+applyInterfaceLanguage();
+const storageFailureChoice = readInterfaceLanguage();
+storageWritable = true;
+selector.value = "es";
+changeLanguage();
+const successfulWriteChoice = readInterfaceLanguage();
+storedLanguage = null;
+syncLanguage({key: null, newValue: null});
+const clearFallback = readInterfaceLanguage();
+const selectedAfterClear = selector.value;
+storedLanguage = "fr";
+syncLanguage({key: INTERFACE_LANGUAGE_KEY, newValue: storedLanguage});
+const crossTabLanguage = readInterfaceLanguage();
+console.log(JSON.stringify({
+  storageFailureChoice,
+  successfulWriteChoice,
+  crossTabLanguage,
+  clearFallback,
+  selectedAfterClear,
+  selected: selector.value
+}));
+"""
+    result = subprocess.run(
+        [node, "-e", harness], text=True, capture_output=True, timeout=15
+    )
+    assert result.returncode == 0, result.stderr
+    assert '"storageFailureChoice":"de"' in result.stdout
+    assert '"successfulWriteChoice":"es"' in result.stdout
+    assert '"crossTabLanguage":"fr"' in result.stdout
+    assert '"clearFallback":"en"' in result.stdout
+    assert '"selectedAfterClear":"en"' in result.stdout
+    assert '"selected":"fr"' in result.stdout
 
 
 def test_the_libraries_page_is_in_the_nav_and_rendered():
@@ -91,7 +235,7 @@ def test_every_rendered_inline_script_parses_as_javascript():
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js is required to syntax-check rendered JavaScript")
-    scripts = re.findall(r"<script[^>]*>(.*?)</script>", page(), re.S)
+    scripts = _inline_scripts(page())
     assert scripts
     for script in scripts:
         checked = subprocess.run([node, "--check"], input=script, text=True,
@@ -111,7 +255,7 @@ def test_browser_regional_formatting_helpers_and_settings_markup():
         pytest.skip("Node.js is required to exercise browser formatting helpers")
 
     html = page()
-    scripts = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)
+    scripts = _inline_scripts(html)
     script = next(x for x in scripts if "const REGIONAL_FORMAT_KEY" in x)
     start = script.index("const esc=")
     end = script.index("\nlet PLATFORMS=", start)
@@ -120,6 +264,9 @@ def test_browser_regional_formatting_helpers_and_settings_markup():
 const memory = new Map();
 let storageAvailable = true;
 let storageWritable = true;
+const UI_LABELS = {};
+const readInterfaceLanguage = () => "en";
+const translateLabel = source => source;
 globalThis.localStorage = {
   getItem: key => {
     if (!storageAvailable) throw new Error("storage unavailable");
@@ -141,10 +288,14 @@ const saved = applyRegionalFormat("de");
 const refreshAfterSave = refreshCountCalls;
 const failedWriteControl = {value: "ja"};
 storageWritable = false;
-const writeFailureHandled = !applyRegionalFormat(failedWriteControl.value, failedWriteControl)
-  && failedWriteControl.value === "de" && getRegionalLocale() === "de"
-  && refreshCountCalls === refreshAfterSave;
+const writeFailureResult = applyRegionalFormat(failedWriteControl.value, failedWriteControl);
+const failedWriteMarkup = regionalFormatField();
+const writeFailureHandled = writeFailureResult
+  && failedWriteControl.value === "ja" && getRegionalLocale() === "ja"
+  && failedWriteMarkup.includes('value="ja" selected')
+  && refreshCountCalls === refreshAfterSave + 1;
 storageWritable = true;
+applyRegionalFormat("de");
 const number = fmt(1234567.89);
 const date = regionalDate("2026-10-12");
 const leapDay = regionalDate("2024-02-29");
@@ -159,17 +310,23 @@ const invalidMonth = regionalMonth("2026-13");
 const year = regionalYear(2026);
 const unknownYear = regionalYear("not-a-year");
 const selectedMarkup = regionalFormatField();
+const refreshBeforeInvalid = refreshCountCalls;
 const invalidRejected = !applyRegionalFormat("not-a-locale")
-  && getRegionalLocale() === "de" && refreshCountCalls === refreshAfterSave;
+  && getRegionalLocale() === "de" && refreshCountCalls === refreshBeforeInvalid;
 const resetSaved = applyRegionalFormat("system");
-const failedControl = {value: "ja"};
-storageAvailable = false;
-const storageFailureHandled = !applyRegionalFormat(failedControl.value, failedControl)
-  && failedControl.value === "system" && getRegionalLocale() === undefined
-  && refreshCountCalls === 2;
-storageAvailable = true;
 const systemLocale = getRegionalLocale() ?? null;
 const systemMarkup = regionalFormatField();
+const storedAfterSystemReset = memory.get(REGIONAL_FORMAT_KEY) ?? null;
+const refreshBeforeStorageFailure = refreshCountCalls;
+const failedControl = {value: "ja"};
+storageAvailable = false;
+const storageFailureResult = applyRegionalFormat(failedControl.value, failedControl);
+const failedStorageMarkup = regionalFormatField();
+const storageFailureHandled = storageFailureResult
+  && failedControl.value === "ja" && getRegionalLocale() === "ja"
+  && failedStorageMarkup.includes('value="ja" selected')
+  && refreshCountCalls === refreshBeforeStorageFailure + 1;
+storageAvailable = true;
 const expectedDate = new Intl.DateTimeFormat("de", {
   timeZone: "UTC"
 }).format(new Date(Date.UTC(2026, 9, 12)));
@@ -207,11 +364,12 @@ console.log(JSON.stringify({
   unknownYearPreserved: unknownYear === "not-a-year",
   invalidRejected,
   systemLocale,
-  storedAfterSystemReset: memory.get(REGIONAL_FORMAT_KEY) ?? null,
+  storedAfterSystemReset,
   accessible: selectedMarkup.includes('aria-describedby="g-regional-format-help"')
     && selectedMarkup.includes('id="g-regional-format-help"'),
   germanOptionSelected: selectedMarkup.includes('value="de" selected'),
-  systemOptionSelected: systemMarkup.includes('value="system" selected')
+  systemOptionSelected: /<option value="system"[^>]* selected>/.test(systemMarkup)
+    && systemMarkup.includes('data-i18n="Use browser settings"')
 }));
 """
     checked = subprocess.run(
@@ -224,7 +382,7 @@ console.log(JSON.stringify({
     assert result["writeFailureHandled"]
     assert result["storageFailureHandled"]
     assert result["refreshAfterSave"] == 1
-    assert result["refreshCountCalls"] == 2
+    assert result["refreshCountCalls"] == 5
     assert result["locale"] == "de"
     assert result["numberMatches"]
     assert result["dateMatches"]
