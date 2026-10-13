@@ -13,18 +13,25 @@ The local command runs an already-configured Python 3.13 environment inside the
 trusted, offline Linux bubblewrap launcher. Have pytest and `requirements.txt`
 dependencies installed in that environment before running it; the launcher
 does not install candidate dependencies or inherit package-index credentials.
-When evaluating an unreviewed branch, copy `trusted-test-launcher.mjs` from a
-reviewed revision to a location outside the checkout. Its default command is
-the same pytest invocation:
+When evaluating an unreviewed branch, copy `trusted-test-launcher.mjs` and
+`trusted-test-sandbox-policy.mjs` from the same reviewed revision to a location
+outside the checkout, keeping them together. Its default command is the same
+pytest invocation:
 
 ```sh
 node /path/to/trusted-test-launcher.mjs "$PWD"
 ```
 
-The launcher has no network access. It copies candidate files into a temporary
-workspace without `.git` or local secrets, makes the host filesystem read-only,
-and masks common user-data locations. Run planning for an unreviewed candidate
-through it too, because planning imports candidate validation configuration.
+The launcher has no network access. It copies only Git-index paths into a
+temporary workspace, so untracked and ignored local files never enter the
+snapshot. Stage new candidate files before launching it. The sandbox hides the
+canonical checkout parent and common host configuration and data roots,
+including `/etc`, `/home`, `/run`, `/srv`, and `/tmp`. Standard program roots
+such as `/opt` and `/usr/local` stay available so the preconfigured interpreter
+and its dependencies can run. When a checkout is nested beneath a recognized
+workspace directory, the sandbox masks that workspace root and its sibling
+checkouts. Run planning for an unreviewed candidate through it too, because
+planning imports candidate validation configuration.
 GitHub Actions remains responsible for receipt-backed hosted validation.
 
 In CI, `--plan` discovers files and required commands without installing

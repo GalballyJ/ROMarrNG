@@ -16,6 +16,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import {
+  HOST_PATHS_TO_HIDE,
+  hostPathsToHide,
+} from './trusted-test-sandbox-policy.mjs';
 
 const launcher = fileURLToPath(
   new URL(
@@ -23,6 +27,11 @@ const launcher = fileURLToPath(
     import.meta.url
   )
 );
+for (const hostPath of ['/etc', '/srv'])
+  assert.ok(
+    HOST_PATHS_TO_HIDE.includes(hostPath),
+    'the sandbox must hide host path ' + hostPath
+  );
 const bwrap = ['/usr/bin/bwrap', '/bin/bwrap'].find(existsSync);
 const sandboxAvailable = (() => {
   if (process.platform !== 'linux' || !bwrap) return false;
@@ -38,7 +47,7 @@ const sandboxAvailable = (() => {
         '--',
         '/bin/true',
       ],
-      { stdio: 'ignore' }
+      { stdio: 'ignore', timeout: 5_000 }
     ).status === 0
   );
 })();
@@ -68,7 +77,7 @@ const nestedSandboxAvailable = (() => {
       '--',
       '/bin/true',
     ],
-    { stdio: 'ignore' }
+    { stdio: 'ignore', timeout: 5_000 }
   );
   return result.status === 0;
 })();
@@ -84,7 +93,7 @@ test(
     const hostFile = path.join(parent, 'host-canary.txt');
     const browserCache = path.join(parent, 'playwright-cache');
     const outsideDependencies = path.join(parent, 'outside-dependencies');
-    const hostSocket = path.join('/var/tmp', `rv-${process.pid}.sock`);
+    const hostSocket = path.join('/tmp', `rv-${process.pid}.sock`);
     const candidateWrite = path.join(source, 'launcher-write-canary.txt');
     mkdirSync(path.join(source, 'bin'), { recursive: true });
     mkdirSync(browserCache, { recursive: true });
@@ -117,6 +126,10 @@ test(
       path.join(source, 'nested/config/secrets.json'),
       '{"secret":"hidden"}\n'
     );
+    writeFileSync(path.join(source, 'auth.json'), '{"token":"private"}\n');
+    writeFileSync(path.join(source, 'token.json'), '{"token":"private"}\n');
+    writeFileSync(path.join(source, 'auth.py'), 'AUTH_MODULE = True\n');
+    writeFileSync(path.join(source, 'credentials.py'), 'CREDENTIALS_MODULE = True\n');
     mkdirSync(path.join(source, 'node_modules'), { recursive: true });
     writeFileSync(
       path.join(source, 'node_modules/marker.txt'),
@@ -146,6 +159,13 @@ assert.equal(process.env.SECRET_CANARY, undefined);
 assert.equal(existsSync('/mnt/workspace/.env'), false);
 assert.equal(existsSync('/mnt/workspace/config.json'), true);
 assert.equal(existsSync('/mnt/workspace/nested/config/operator.json'), false);
+assert.equal(existsSync('/mnt/workspace/auth.json'), false);
+assert.equal(existsSync('/mnt/workspace/token.json'), false);
+assert.equal(existsSync('/mnt/workspace/auth.py'), true);
+assert.equal(existsSync('/mnt/workspace/credentials.py'), true);
+assert.equal(existsSync('/etc/os-release'), false);
+const originalCheckout = ${JSON.stringify(source)};
+assert.throws(() => readFileSync(path.join(originalCheckout, 'auth.json')), { code: 'ENOENT' });
 assert.equal(existsSync('/mnt/workspace/nested/.env.local'), false);
 assert.equal(existsSync('/mnt/workspace/nested/config/secrets.json'), false);
 assert.throws(() => writeFileSync(hostFile, 'escaped'));
@@ -240,6 +260,7 @@ test(
     const workspaceRoot = '/usr/local/share/workspaces';
     const virtualRoot = `${workspaceRoot}/romarrng-${path.basename(parent)}`;
     const virtualSibling = `${workspaceRoot}/other-project-${path.basename(parent)}`;
+    const sourceAlias = '/tmp/candidate-checkout';
     mkdirSync(source, { recursive: true });
     mkdirSync(sibling, { recursive: true });
     writeFileSync(path.join(source, 'README.md'), 'safe candidate content\n');
@@ -302,13 +323,16 @@ test(
         '/proc',
         '--tmpfs',
         '/tmp',
+        '--symlink',
+        virtualRoot,
+        sourceAlias,
         '--setenv',
         'TMPDIR',
         '/tmp',
         '--',
         process.execPath,
         launcher,
-        virtualRoot,
+        sourceAlias,
         '--',
         process.execPath,
         '-e',
@@ -324,3 +348,23 @@ test(
     );
   }
 );
+
+test('sandbox masks standard and checkout host roots', () => {
+  assert.ok(HOST_PATHS_TO_HIDE.includes('/etc'));
+  assert.ok(hostPathsToHide('/projects/ROMarrNG').includes('/projects'));
+  const nestedCheckout = hostPathsToHide('/projects/team/work/ROMarrNG');
+  assert.ok(nestedCheckout.includes('/projects'));
+  assert.ok(!nestedCheckout.includes('/projects/team'));
+  const localCheckout = hostPathsToHide(
+    '/usr/local/share/workspaces/ROMarrNG'
+  );
+  assert.ok(localCheckout.includes('/usr/local/share/workspaces'));
+  assert.ok(!localCheckout.includes('/usr/local'));
+  assert.ok(!localCheckout.includes('/opt'));
+  assert.ok(hostPathsToHide('/ROMarrNG').includes('/ROMarrNG'));
+  assert.equal(
+    hostPathsToHide('/home/keith/ROMarrNG').includes('/home/keith'),
+    false
+  );
+  assert.throws(() => hostPathsToHide('/'), /cannot be the filesystem root/u);
+});
