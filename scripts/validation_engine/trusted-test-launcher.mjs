@@ -18,45 +18,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { hostPathsToHide } from './trusted-test-sandbox-policy.mjs';
 
 const GUEST_WORKSPACE = '/mnt/workspace';
 const GUEST_RUN = '/mnt/run-data';
 const GUEST_MARKER = '/run/validation-engine-sandbox';
 const GIT = ['/usr/bin/git', '/bin/git'].find(existsSync);
 const sensitiveName =
-  /^(?:\.env(?:$|\.(?!example$)[^/]+)|\.ssh|\.aws|\.gnupg|id_(?:rsa|ed25519)|credentials?(?:\.[^/]+)?|secrets?(?:\.[^/]+)?|\.git-credentials|\.npmrc|\.pypirc|\.netrc|[^/]+\.(?:pem|key))$/iu;
-const workspaceDirectoryNames = new Set([
-  'workspace',
-  'workspaces',
-  'work',
-  'projects',
-  'repositories',
-  'repos',
-  'code',
-]);
-const systemRootDirectoryNames = new Set([
-  'bin',
-  'boot',
-  'dev',
-  'etc',
-  'home',
-  'lib',
-  'lib32',
-  'lib64',
-  'media',
-  'mnt',
-  'opt',
-  'proc',
-  'root',
-  'run',
-  'sbin',
-  'srv',
-  'sys',
-  'tmp',
-  'usr',
-  'var',
-]);
-
+  /^(?:\.env(?:$|\.(?!example$)[^/]+)|\.ssh|\.aws|\.gnupg|id_(?:rsa|ed25519)|auth(?:entication)?(?:\.[^/]+)?|tokens?(?:\.[^/]+)?|credentials?(?:\.[^/]+)?|secrets?(?:\.[^/]+)?|\.git-credentials|\.npmrc|\.pypirc|\.netrc|[^/]+\.(?:pem|key))$/iu;
 function isSensitive(relativePath, tracked) {
   const segments = relativePath.split('/');
   if (segments.includes('.git') || segments.includes('node_modules'))
@@ -84,34 +53,16 @@ function gitEnvironment(home, template) {
   };
 }
 
-function trackedAndCandidateFiles(root, env) {
+function indexedFiles(root, env) {
   const trackedOutput = execFileSync(
     GIT,
     ['-c', 'core.fsmonitor=false', '-C', root, 'ls-files', '--cached', '-z'],
     { encoding: 'buffer', env, maxBuffer: 64 * 1024 * 1024 }
   );
-  const output = execFileSync(
-    GIT,
-    [
-      '-c',
-      'core.fsmonitor=false',
-      '-c',
-      'core.hooksPath=/dev/null',
-      '-C',
-      root,
-      'ls-files',
-      '--cached',
-      '--others',
-      '--exclude-standard',
-      '-z',
-    ],
-    { encoding: 'buffer', env, maxBuffer: 64 * 1024 * 1024 }
-  );
+  const files = trackedOutput.toString('utf8').split('\0').filter(Boolean);
   return {
-    files: output.toString('utf8').split('\0').filter(Boolean).sort(),
-    tracked: new Set(
-      trackedOutput.toString('utf8').split('\0').filter(Boolean)
-    ),
+    files: files.sort(),
+    tracked: new Set(files),
   };
 }
 
@@ -123,23 +74,6 @@ function isWithin(root, candidate) {
       !relative.startsWith(`..${path.sep}`) &&
       !path.isAbsolute(relative))
   );
-}
-
-function checkoutMaskRoot(sourceRoot) {
-  const root = path.parse(sourceRoot).root;
-  const segments = sourceRoot.slice(root.length).split(path.sep).filter(Boolean);
-  const workspaceIndex = segments.slice(0, -1).findIndex((segment) =>
-    workspaceDirectoryNames.has(segment.toLowerCase())
-  );
-  if (workspaceIndex !== -1)
-    return path.join(root, ...segments.slice(0, workspaceIndex + 1));
-
-  const topLevel = segments[0];
-  if (topLevel && !systemRootDirectoryNames.has(topLevel.toLowerCase()))
-    return path.join(root, topLevel);
-
-  const parent = path.dirname(sourceRoot);
-  return parent === root ? sourceRoot : parent;
 }
 
 function copyCandidateFile(sourceRoot, workspaceRoot, relativePath, tracked) {
@@ -270,7 +204,7 @@ function bubblewrapPath() {
 }
 
 function makeSandboxCommand({
-  checkoutMaskRoot,
+  sourceRoot,
   workspace,
   runDirectory,
   dependencies,
@@ -350,10 +284,11 @@ function makeSandboxCommand({
     '--ro-bind',
     '/',
     '/',
-    '--tmpfs',
-    checkoutMaskRoot,
-    '--tmpfs',
-    '/mnt',
+  ];
+  for (const directory of hostPathsToHide(sourceRoot))
+    if (directory === '/mnt' || existsSync(directory))
+      args.push('--tmpfs', directory);
+  args.push(
     '--dir',
     GUEST_WORKSPACE,
     '--bind',
@@ -363,8 +298,8 @@ function makeSandboxCommand({
     GUEST_RUN,
     '--bind',
     runDirectory,
-    GUEST_RUN,
-  ];
+    GUEST_RUN
+  );
   for (const [source, target] of mounts) args.push('--ro-bind', source, target);
   for (const [source, target] of dependencyMounts)
     args.push('--ro-bind', source, target);
@@ -375,27 +310,9 @@ function makeSandboxCommand({
     '/dev',
     '--tmpfs',
     '/dev/shm',
-    '--tmpfs',
-    '/home',
-    '--tmpfs',
-    '/root',
-    '--tmpfs',
-    '/run',
     '--ro-bind',
     markerFile,
     GUEST_MARKER,
-    '--tmpfs',
-    '/var',
-    '--tmpfs',
-    '/tmp',
-    '--tmpfs',
-    '/sys',
-    '--tmpfs',
-    '/media',
-    '--tmpfs',
-    '/opt',
-    '--tmpfs',
-    '/srv'
   );
   for (const directory of [
     env.HOME,
@@ -485,7 +402,7 @@ async function main() {
       path.join(runDirectory, 'empty')
     );
     mkdirSync(hostEnv.GIT_TEMPLATE_DIR, { mode: 0o700 });
-    const candidateFiles = trackedAndCandidateFiles(sourceRoot, hostEnv);
+    const candidateFiles = indexedFiles(sourceRoot, hostEnv);
     for (const file of candidateFiles.files)
       copyCandidateFile(
         sourceRoot,
@@ -496,7 +413,7 @@ async function main() {
     createSyntheticGitRepository(workspace, runDirectory);
     const dependencies = linkDependencies(sourceRoot, workspace);
     const command = makeSandboxCommand({
-      checkoutMaskRoot: checkoutMaskRoot(sourceRoot),
+      sourceRoot,
       workspace,
       runDirectory,
       dependencies,
