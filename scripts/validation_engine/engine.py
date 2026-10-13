@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -45,6 +46,9 @@ APPROVED_TASK_PASS_ENVIRONMENT: dict[str, frozenset[str]] = {
 }
 IGNORED_DIRS = {".git", ".pytest_cache", "__pycache__", ".venv", "venv", "node_modules", "_output", "_tests", "TestResults", "coverage"}
 PROGRESS_INTERVAL_SECONDS = 60
+MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+MAX_LOG_BYTES = 16 * 1024 * 1024
+LOG_TRUNCATION_MARKER = b"\n[validation log truncated after 16 MiB]\n"
 
 
 class ValidationError(RuntimeError):
@@ -482,7 +486,21 @@ def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]
     started_at = utc_now()
     env = isolated_task_environment(task, log_path.parent)
     dumpable_state = _hide_parent_environment()
+    log_file = None
+    state: dict[str, Any] = {
+        "outputBytes": 0,
+        "tailChunks": deque(),
+        "tailBytes": 0,
+        "logBytes": 0,
+        "logTruncated": False,
+        "logError": None,
+    }
+    proc: subprocess.Popen[bytes] | None = None
+    reader: threading.Thread | None = None
     try:
+        log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        log_file = log_path.open("xb", buffering=0)
+        os.chmod(log_path, 0o600)
         proc = subprocess.Popen(
             task["command"],
             cwd=root,
@@ -492,36 +510,147 @@ def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]
             start_new_session=(os.name != "nt"),
         )
         timed_out = False
+
+        def drain_output() -> None:
+            assert proc is not None and proc.stdout is not None
+            assert log_file is not None
+            try:
+                while True:
+                    chunk = proc.stdout.read1(64 * 1024)
+                    if not chunk:
+                        break
+                    state["outputBytes"] += len(chunk)
+                    state["tailChunks"].append(chunk)
+                    state["tailBytes"] += len(chunk)
+                    while state["tailBytes"] > MAX_OUTPUT_BYTES:
+                        excess = state["tailBytes"] - MAX_OUTPUT_BYTES
+                        first = state["tailChunks"][0]
+                        if excess >= len(first):
+                            state["tailChunks"].popleft()
+                            state["tailBytes"] -= len(first)
+                        else:
+                            state["tailChunks"][0] = first[excess:]
+                            state["tailBytes"] -= excess
+                    if state["logError"] is not None:
+                        continue
+                    remaining = MAX_LOG_BYTES - len(LOG_TRUNCATION_MARKER) - state["logBytes"]
+                    length = min(len(chunk), max(0, remaining))
+                    if length:
+                        try:
+                            view = memoryview(chunk)[:length]
+                            while view:
+                                written = log_file.write(view)
+                                if not written:
+                                    raise OSError("short write while recording validation output")
+                                view = view[written:]
+                            state["logBytes"] += length
+                        except OSError as error:
+                            state["logError"] = str(error)
+                            state["logTruncated"] = True
+                    if length < len(chunk):
+                        state["logTruncated"] = True
+            except OSError as error:
+                state["logError"] = str(error)
+                state["logTruncated"] = True
+
+        reader = threading.Thread(target=drain_output, daemon=True)
+        reader.start()
         try:
-            output_bytes, _ = proc.communicate(
-                timeout=task.get("timeout_seconds", 1800))
+            proc.wait(timeout=task.get("timeout_seconds", 1800))
         except subprocess.TimeoutExpired:
             timed_out = True
+            os.fsync(log_file.fileno())
             if os.name != "nt":
                 try:
                     os.killpg(proc.pid, signal.SIGTERM)
-                    proc.wait(timeout=2)
                 except ProcessLookupError:
                     pass
-                except subprocess.TimeoutExpired:
+                except OSError:
+                    proc.terminate()
+            else:
+                proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                if os.name != "nt":
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-            else:
-                proc.kill()
-            output_bytes, _ = proc.communicate()
+                    except OSError:
+                        proc.kill()
+                else:
+                    proc.kill()
+                proc.wait()
+        reader.join(timeout=2)
+        if reader.is_alive() and os.name != "nt":
+            # A task can leave a descendant holding stdout open after its main
+            # process exits. Reap that process group before waiting for EOF.
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            reader.join(timeout=2)
+            if reader.is_alive():
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        reader.join()
+        if proc.stdout is not None:
+            proc.stdout.close()
     finally:
         # Keep the runner hidden for the entire child lifetime. Restore it only
         # after the task exits so unrelated local tooling remains unaffected.
-        _restore_parent_environment(dumpable_state)
+        try:
+            if proc is not None and proc.poll() is None:
+                if os.name != "nt":
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    if os.name != "nt":
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except OSError:
+                            proc.kill()
+                    else:
+                        proc.kill()
+                    proc.wait()
+            if reader is not None and reader.is_alive():
+                reader.join(timeout=2)
+                if reader.is_alive() and proc is not None and os.name != "nt":
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                reader.join()
+        finally:
+            try:
+                _restore_parent_environment(dumpable_state)
+            finally:
+                if log_file is not None:
+                    try:
+                        if state["logTruncated"] and state["logError"] is None:
+                            log_file.write(LOG_TRUNCATION_MARKER)
+                        log_file.flush()
+                        os.fsync(log_file.fileno())
+                    except OSError as error:
+                        state["logError"] = state["logError"] or str(error)
+                    finally:
+                        try:
+                            log_file.close()
+                        except OSError as error:
+                            state["logError"] = state["logError"] or str(error)
+    output_bytes = b"".join(state["tailChunks"])
     output = output_bytes.decode("utf-8", "replace")
-    with log_path.open("wb") as log:
-        os.chmod(log_path, 0o600)
-        log.write(output_bytes)
     counts = parse_counts(task, output) if task.get("kind") == "test" else {"passed": 0, "skipped": 0, "failed": 0, "excluded": 0}
-    passed = proc.returncode == 0 and not timed_out and (task.get("kind") != "test" or counts["passed"] >= task.get("minimum_cases", 1))
-    status = "failed" if timed_out or proc.returncode != 0 else "passed" if passed else "incomplete"
+    assert proc is not None
+    passed = proc.returncode == 0 and not timed_out and state["logError"] is None and (task.get("kind") != "test" or counts["passed"] >= task.get("minimum_cases", 1))
+    status = "failed" if timed_out or proc.returncode != 0 or state["logError"] is not None else "passed" if passed else "incomplete"
     return {
         "taskId": task["id"],
         "status": status,
@@ -529,8 +658,8 @@ def run_task(root: Path, task: dict[str, Any], log_path: Path) -> dict[str, Any]
         "durationMs": int((time.monotonic() - start) * 1000),
         "exitCode": proc.returncode,
         "timedOut": timed_out,
-        "outputBytes": len(output_bytes),
-        "logSha256": digest_bytes(output_bytes),
+        "outputBytes": state["outputBytes"],
+        "logSha256": digest_bytes(log_path.read_bytes()),
         "logFile": log_path.name,
         "activeCases": counts["passed"] if task.get("kind") == "test" else None,
         "passedCases": counts["passed"] if task.get("kind") == "test" else None,

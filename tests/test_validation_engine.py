@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -224,6 +225,47 @@ def test_native_task_writes_private_log_and_records_result_counts(tmp_path: Path
     assert result["skippedCases"] == 1
     assert result["excludedCases"] == 2
     assert log.stat().st_mode & 0o777 == 0o600
+
+
+def test_validation_task_streams_output_to_a_bounded_marked_log(tmp_path: Path) -> None:
+    output_size = 16 * 1024 * 1024 + 1
+    task = {
+        "id": "output-limit-fixture",
+        "kind": "setup",
+        "command": [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(b'x' * " + str(output_size) + "); "
+            "sys.stdout.write('VALIDATION_OUTPUT_COMPLETE')",
+        ],
+        "timeout_seconds": 30,
+    }
+    log = tmp_path / "bounded.log"
+    result = run_task(tmp_path, task, log)
+    contents = log.read_bytes()
+    assert result["status"] == "passed"
+    assert result["outputBytes"] == output_size + len("VALIDATION_OUTPUT_COMPLETE")
+    assert len(contents) == 16 * 1024 * 1024
+    assert contents.endswith(b"\n[validation log truncated after 16 MiB]\n")
+    assert result["logSha256"] == hashlib.sha256(contents).hexdigest()
+
+
+def test_validation_task_persists_output_before_timeout(tmp_path: Path) -> None:
+    task = {
+        "id": "timeout-log-fixture",
+        "kind": "setup",
+        "command": [
+            sys.executable,
+            "-c",
+            "import sys, time; print('persisted-before-timeout', flush=True); time.sleep(10)",
+        ],
+        "timeout_seconds": 0.1,
+    }
+    log = tmp_path / "timeout.log"
+    result = run_task(tmp_path, task, log)
+    assert result["status"] == "failed"
+    assert result["timedOut"] is True
+    assert "persisted-before-timeout" in log.read_text(encoding="utf-8")
 
 
 def test_validation_child_process_environment_is_allowlisted(

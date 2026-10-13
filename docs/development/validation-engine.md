@@ -10,9 +10,10 @@ node /path/to/trusted-test-launcher.mjs "$PWD" -- python3.13 -m pytest tests/ -q
 ```
 
 The local command runs an already-configured Python 3.13 environment inside the
-trusted, offline Linux bubblewrap launcher. Have pytest and `requirements.txt`
-dependencies installed in that environment before running it; the launcher
-does not install candidate dependencies or inherit package-index credentials.
+trusted, offline Linux bubblewrap launcher. Have pytest, test-only PyYAML, and
+`requirements.txt` dependencies installed in that environment before running
+it; the launcher does not install candidate dependencies or inherit
+package-index credentials.
 When evaluating an unreviewed branch, copy `trusted-test-launcher.mjs` and
 `trusted-test-sandbox-policy.mjs` from the same reviewed revision to a location
 outside the checkout, keeping them together. Its default command is the same
@@ -24,7 +25,13 @@ node /path/to/trusted-test-launcher.mjs "$PWD"
 
 The launcher has no network access. It copies only Git-index paths into a
 temporary workspace, so untracked and ignored local files never enter the
-snapshot. Stage new candidate files before launching it. The sandbox hides the
+snapshot. Dotted and extensionless credentials, private/API keys,
+access/refresh-token names, client-secret names, and credential material with
+source-like extensions are excluded. Suffixed dotenv credentials such as
+tokens.env.local are excluded, while tokens.env.example remains available.
+Source files under credential-named folders remain available unless their own
+names identify credential material.
+Stage new candidate files before launching it. The sandbox hides the
 canonical checkout parent and common host configuration and data roots,
 including `/etc`, `/home`, `/run`, `/srv`, and `/tmp`. Standard program roots
 such as `/opt` and `/usr/local` stay available so the preconfigured interpreter
@@ -37,14 +44,16 @@ GitHub Actions remains responsible for receipt-backed hosted validation.
 In CI, `--plan` discovers files and required commands without installing
 packages or running pytest. Pull requests, main-branch pushes, version-tag
 pushes, and manual runs use GitHub-hosted runners. Pushes to other branches do
-not trigger this workflow. Because this is a public repository, no workflow
-job uses a persistent self-hosted runner; the workflow definition itself can
-be changed by a pull request, so runner selection cannot be treated as a
-security boundary inside contributor-controlled YAML. The Linux validation
-job uses `setup-python` and creates its temporary workspace beneath
+not trigger this workflow. Because this is a public repository, no job runs on
+a persistent self-hosted machine: pull request workflow files are
+contributor-controlled and can change runner selection. A condition inside
+that same workflow is not a security boundary. If the project later moves to an
+organization with runner groups restricted to trusted workflow refs, that
+enforcement can be reconsidered. The Linux validation job uses `setup-python`
+with Python 3.13 and creates its temporary workspace beneath
 `RUNNER_TEMP`. It uses the validation engine to install repository
-requirements and pytest in a task environment before running the native
-suite. The test task uses
+requirements, pytest, and test-only PyYAML in a task environment before
+running the native suite. The test task uses
 `pytest.ini` as configured, including its default `not network`
 marker, so tests that reach the public internet remain deselected. The engine
 counts passed, skipped, failed, and deselected tests from pytest's summary and
@@ -67,7 +76,11 @@ Each run uses a new private temporary directory for its receipt and hashed
 pytest log. The candidate fingerprint includes the Git commit/tree and diff,
 untracked files, the discovered `tests/test_*.py` file hashes, and the test
 workflow, pytest configuration, and requirements input digests. A change during
-execution blocks the result. No result cache is reused.
+execution blocks the result. No result cache is reused. The engine drains child
+output in a background reader, retains only the bounded diagnostic tail in
+memory, and caps the private log at 16 MiB with an explicit truncation marker.
+Sandbox mounts are pinned through inherited file descriptors before the
+launcher masks host paths.
 
 Runtime probes and child commands receive only an inherited allowlist for
 executable paths, platform process variables, locale, and timezone, plus child
@@ -91,7 +104,7 @@ source snapshot; it does not replace the local test evidence.
 The `install-test-dependencies` task runs only in hosted CI. Running the engine's
 `--tests-only` selection locally is intentionally refused because it includes
 that package-install task; use the trusted launcher with the preconfigured
-Python environment instead. The workflow currently installs `requirements.txt`
-and pytest without a Python dependency lockfile. The engine binds those
-manifests and the Python 3.13 runtime, but dependency versions are not yet
-reproducible from a lockfile.
+Python environment instead. The workflow currently installs `requirements.txt`,
+pytest, and test-only PyYAML without a Python dependency lockfile. The engine
+binds those manifests and the Python 3.13 runtime, but dependency versions are
+not yet reproducible from a lockfile.
