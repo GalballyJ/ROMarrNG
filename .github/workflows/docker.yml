@@ -56,8 +56,9 @@ jobs:
           python scripts/release_notes.py check-changelog-tags
 
   test:
-    # This is a public repository. Never run contributor-controlled workflow code on a persistent self-hosted machine.
-    runs-on: ubuntu-latest
+    # Pull requests and tags stay hosted. The organization runner group is
+    # server-restricted to this workflow on main before trusted main runs use it.
+    runs-on: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && vars.TRUSTED_MAIN_RUNNERS_ENABLED == 'true' && fromJSON('{"group":"trusted-main","labels":["self-hosted","Linux","X64","host"]}')) || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
