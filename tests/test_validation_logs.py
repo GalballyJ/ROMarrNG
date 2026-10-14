@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.validation_engine.engine import export_receipt
 from scripts.validation_engine.retain_failed_pytest_logs import stage_failed_pytest_logs
 
 
@@ -63,6 +64,37 @@ def test_only_receipt_verified_failed_task_logs_are_staged(tmp_path):
     manifest = json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["failedTaskCount"] == 1
     assert manifest["tasks"][0]["logSha256"] == hashlib.sha256(failed_log).hexdigest()
+
+
+def test_engine_exported_receipt_provides_evidence_for_failed_log_staging(tmp_path):
+    private_root = tmp_path / "private"
+    private_root.mkdir()
+    evidence = private_root / "run-evidence"
+    evidence.mkdir()
+    log_contents = b"pytest failure details\n"
+    (evidence / "pytest-shard-a.log").write_bytes(log_contents)
+    receipt = private_root / "romarr-validation" / "pytest.json"
+    failed_task = {
+        "taskId": "pytest-shard-a",
+        "status": "failed",
+        "exitCode": 2,
+        "logFile": "pytest-shard-a.log",
+        "logSha256": hashlib.sha256(log_contents).hexdigest(),
+    }
+
+    export_receipt(
+        {"schemaVersion": 2, "repository": "romarrng", "tasks": [failed_task]},
+        str(receipt),
+        evidence,
+    )
+    destination = private_root / "romarr-validation" / "failed-task-logs"
+    staged = stage_failed_pytest_logs(receipt, private_root, destination)
+
+    assert [task["taskId"] for task in staged] == ["pytest-shard-a"]
+    assert (destination / "pytest-shard-a.log").read_bytes() == log_contents
+    assert json.loads(receipt.read_text(encoding="utf-8"))["evidenceDirectory"] == str(
+        evidence.resolve()
+    )
 
 
 def test_failed_task_log_digest_must_match_receipt(tmp_path):

@@ -1061,7 +1061,9 @@ def make_receipt(plan: dict[str, Any], run_id: str, started_at: str, by_id: dict
     return receipt
 
 
-def export_receipt(receipt: dict[str, Any], destination: str) -> None:
+def export_receipt(
+    receipt: dict[str, Any], destination: str, evidence_directory: Path
+) -> None:
     raw_target = Path(destination).absolute()
     if raw_target.is_symlink():
         raise ValidationError("Validation receipt export cannot replace a symbolic link.")
@@ -1071,8 +1073,19 @@ def export_receipt(receipt: dict[str, Any], destination: str) -> None:
         roots.append(Path(os.environ["RUNNER_TEMP"]).resolve())
     if not any(target != root and root in target.parents for root in roots):
         raise ValidationError("Validation receipts may only be exported beneath a system or runner temporary directory.")
+    raw_evidence = evidence_directory.absolute()
+    if raw_evidence.is_symlink():
+        raise ValidationError("Validation evidence cannot be exported from a symbolic link.")
+    evidence = raw_evidence.resolve(strict=True)
+    if not evidence.is_dir():
+        raise ValidationError("Validation evidence is not a directory.")
+    if not any(evidence != root and root in evidence.parents for root in roots):
+        raise ValidationError(
+            "Validation evidence may only be exported from a system or runner temporary directory."
+)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    exported_receipt = {**receipt, "evidenceDirectory": str(evidence)}
+    target.write_text(json.dumps(exported_receipt, indent=2) + "\n", encoding="utf-8")
     os.chmod(target, 0o600)
 
 
@@ -1111,7 +1124,7 @@ def main(argv: list[str] | None = None) -> int:
         release_lock(lock)
     export_path = os.environ.get("VALIDATION_RECEIPT_EXPORT")
     if export_path:
-        export_receipt(receipt, export_path)
+        export_receipt(receipt, export_path, run_root)
     summary = {
         "repository": receipt["repository"],
         "status": receipt["status"],
