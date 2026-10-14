@@ -32,7 +32,11 @@
 - Local tests use Python 3.13, the configured pytest environment, and the trusted offline Linux bubblewrap launcher described in docs/development/validation-engine.md.
 - For an unreviewed candidate, copy the trusted launcher from a reviewed revision outside the checkout and run both planning and tests through it. Do not run candidate validation configuration directly on the host.
 - The launcher has no network access. The local suite uses pytest's configured exclusions and reports passed, skipped, failed, and deselected cases. A plan is discovery evidence, not a test pass; the local tests-only selection is intentionally refused.
-- GitHub Actions supplies the hosted receipt-backed test and image checks. A local pytest pass does not establish hosted runner, release artifact, or live integration behavior.
+- GitHub Actions supplies receipt-backed test and image checks. Pull requests,
+  version tags, and manual runs outside main use hosted runners. Trusted main may
+  use the restricted organization pool only when `TRUSTED_MAIN_RUNNERS_ENABLED`
+  is `true`; otherwise it stays hosted. A local pytest pass does not establish
+  runner, release artifact, or live integration behavior.
 - Report the actual command, test counts, skips, exclusions, and unavailable prerequisites. Do not claim live behavior without live evidence.
 
 ## Release notes
