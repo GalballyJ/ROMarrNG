@@ -51,11 +51,14 @@ snapetech-org/ROMarrNG/.github/workflows/docker.yml@refs/heads/main. That policy
 prevents pull-request versions of this public workflow from selecting the
 persistent pool, while the workflow expression keeps PRs, tags, and non-main
 manual runs hosted. Pushes to other branches do
-not trigger this workflow. The Linux validation job uses `setup-python`
-with Python 3.13 and creates its temporary workspace beneath
-`RUNNER_TEMP`. It uses the validation engine to install repository
-requirements, pytest, and test-only PyYAML in a task environment before
-running the native suite. The engine divides discovered test files into four
+not trigger this workflow. The Linux validation job uses `setup-python` with
+Python 3.13 on GitHub-hosted runners. On the trusted Arch Linux pool, it installs a pinned uv
+CLI and uses it to install managed Python 3.13 beneath the job's private
+`RUNNER_TEMP` directory, then adds that interpreter to the job path. This keeps
+the test runtime independent of the runner distribution and avoids global
+installation paths. The job uses the validation engine to install repository
+requirements, pytest, and test-only PyYAML in a task environment before running
+the native suite. The engine divides discovered test files into four
 disjoint inventory shards and runs at most two shards at once after dependency
 installation completes. Each shard has its own environment and log, and
 disables pytest's shared cache plugin. The test tasks use `pytest.ini` as
