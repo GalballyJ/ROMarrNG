@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
 from typing import Sequence
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def add_repository_root_to_import_path(root: Path) -> None:
+    """Make the candidate package importable without inheriting PYTHONPATH."""
+    repository_root = str(root.resolve())
+    if repository_root not in sys.path:
+        sys.path.insert(0, repository_root)
 
 
 def shard_files(root: Path, letters: str) -> list[str]:
@@ -33,6 +41,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         files = shard_files(ROOT, args.letters)
     except ValueError as error:
         parser.error(str(error))
+    add_repository_root_to_import_path(ROOT)
     return int(pytest.main(["-q", "-p", "no:cacheprovider", *files]))
 
 

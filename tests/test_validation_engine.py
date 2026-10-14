@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import shutil
@@ -28,6 +29,7 @@ from scripts.validation_engine.engine import (
     run_task_pool,
 )
 from scripts.validation_engine.reconcile import reconcile_receipts
+from scripts.validation_engine import run_pytest_shard
 from scripts.validation_engine.run_pytest_shard import shard_files
 from scripts.validation_engine.trusted_sandbox import require_trusted_local_test_sandbox
 
@@ -138,6 +140,34 @@ def test_pytest_shard_selection_rejects_invalid_and_empty_shards(tmp_path: Path)
         shard_files(tmp_path, "A")
     with pytest.raises(ValueError, match="did not select any test files"):
         shard_files(tmp_path, "z")
+
+
+def test_pytest_shard_runner_exposes_candidate_package_to_collection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    package = tmp_path / "romarr"
+    package.mkdir()
+    (package / "__init__.py").write_text("ORIGIN = 'candidate-root'\n", encoding="utf-8")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_runner.py").write_text("def test_placeholder(): pass\n", encoding="utf-8")
+    repository_root = str(tmp_path.resolve())
+    monkeypatch.setattr(run_pytest_shard, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "path", [
+        entry for entry in sys.path if Path(entry or ".").resolve() != tmp_path.resolve()
+    ])
+    monkeypatch.delitem(sys.modules, "romarr", raising=False)
+    imported: list[str] = []
+
+    def collect_with_candidate_import_path(_args: list[str]) -> int:
+        imported.append(importlib.import_module("romarr").ORIGIN)
+        return 0
+
+    monkeypatch.setattr(run_pytest_shard.pytest, "main", collect_with_candidate_import_path)
+
+    assert run_pytest_shard.main(["r"]) == 0
+    assert imported == ["candidate-root"]
+    assert sys.path[0] == repository_root
 
 
 def test_bounded_task_pool_runs_independent_tasks_concurrently() -> None:
