@@ -1,5 +1,6 @@
 """The rendered page, as a browser reads it rather than as the source spells it."""
 
+import json
 import re
 from html.parser import HTMLParser
 from pathlib import Path
@@ -165,6 +166,116 @@ def test_static_localization_helper_sources_exist_in_every_catalog():
     )
     referenced = {match.group(2) for match in call.finditer(source)}
     assert referenced <= UI_LABELS.keys(), sorted(referenced - UI_LABELS.keys())
+
+
+def test_localization_catalog_rejects_duplicate_source_keys():
+    catalog = Path(__file__).parents[1] / "romarr" / "ui-labels.json"
+
+    def unique_object(pairs):
+        out = {}
+        for key, value in pairs:
+            assert key not in out, f"duplicate localization source key: {key}"
+            out[key] = value
+        return out
+
+    json.loads(catalog.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
+
+
+def test_backend_explanations_and_validation_errors_reach_localized_sinks():
+    from romarr.ui import UI_LABELS
+
+    root = Path(__file__).parents[1]
+    ui = (root / "romarr" / "ui.py").read_text(encoding="utf-8")
+    selection = (root / "romarr" / "selection.py").read_text(encoding="utf-8")
+    collections = (root / "romarr" / "collections.py").read_text(encoding="utf-8")
+    catalogue = (root / "romarr" / "catalogue.py").read_text(encoding="utf-8")
+    app = (root / "romarr" / "app.py").read_text(encoding="utf-8")
+    library = (root / "romarr" / "library.py").read_text(encoding="utf-8")
+    sniff = (root / "romarr" / "sniff.py").read_text(encoding="utf-8")
+    profiles = (root / "romarr" / "profiles.py").read_text(encoding="utf-8")
+
+    required = {
+        "seeders: {count}",
+        "no seeders on a public tracker",
+        "no seeders (private tracker, often temporary)",
+        "title does not match {title}",
+        "blocklisted: {reason}",
+        "region {region}",
+        "region {region} is {rank} of {count} in your preference",
+        "region {region} is {rank} of {count} in your preference; it is the parent dump",
+        "no dump matched your preferred regions, so the set keeps this one rather than losing the game",
+        "unknown platform: {platform}",
+        "search failed: {error}",
+        "No usable release was found. Checked results: {count}.",
+        "no such queue item",
+        "that search has expired -- run it again",
+        "release offers no usable download link",
+        "could not tell which platform this belongs to; choose one",
+        "{path} does not exist",
+        "no {platform} ROM found; candidate count: {count}.",
+        "already in the library",
+        "unsafe game directory",
+        "unsafe or duplicate game file",
+        "game import failed: {error}",
+        "download path does not exist in this container: {path}. Mount the download client's completed directory at that exact path, or add a remote path mapping under Settings -> Media Management.",
+        "two files in this download are both called {name} ({first} and {second}); refusing to guess which one the game needs",
+        "slug must be lower-case words joined by hyphens, e.g. my-plugin",
+        "name is required",
+        "description is required -- it is what somebody reads before deciding to run your code",
+        "declare at least one capability, or nothing will ever call the plugin",
+        "repository: no URL given",
+        "repository: must be https -- plain http lets anyone on the network choose what code you run",
+        "repository: no host in the URL",
+        "repository: {host} is not an allowed source. Allowed: {allowed}. Add it under Settings if you host your own forge.",
+        "repository: that is a host, not a repository",
+        "iNES header (NES\\x1a)",
+        "Nintendo 64 magic, {order}",
+        "Nintendo logo at 0x104, CGB flag set",
+        "Nintendo logo at 0x104",
+        "Nintendo logo at 0x04",
+        "SEGA console name at 0x100",
+        "TMR SEGA signature at {offset} (Master System or Game Gear)",
+        "ATARI7800 header",
+        "LYNX header",
+        "Wii disc magic at 0x18",
+        "GameCube disc magic at 0x1c",
+        "{format} compressed disc image (GameCube or Wii)",
+        "Sega CD boot header at {offset}",
+        "Saturn boot header at {offset}",
+        "Dreamcast boot header at {offset}",
+        "3DO opera filesystem header",
+        "ISO9660 with a PLAYSTATION volume identifier (PlayStation or PS2)",
+        "{reason} — confirmed by the header",
+        "{reason} — chosen over {count} platforms sharing this extension",
+        "{empty} of {sampled} sampled regions are empty, including the start — the file has its full size ({size} MB) and almost no content, which is what an interrupted download leaves behind",
+        "blocked by the operator",
+        "release profile prefers {term}",
+        "excluded by release profile ({term})",
+        "missing a required term ({term})",
+    }
+    assert required <= UI_LABELS.keys(), sorted(required - UI_LABELS.keys())
+    assert "r.reasons.map(searchReasonMarkup)" in ui
+    assert "collectionReasonMarkup(t.why)" in ui
+    assert "appMessageMarkup(i.detail)" in ui
+    assert "d.problems.map(appMessageMarkup)" in ui
+    assert "no usable release among (\\d+) result\\(s\\)" in ui
+    assert "no (.+) ROM among (\\d+) file\\(s\\)" in ui
+    assert "f\"seeders: {release.seeders}\"" in selection
+    assert "no dump matched your preferred regions, so the set keeps " in collections
+    assert "slug must be lower-case words joined by hyphens" in catalogue
+    assert "declare at least one capability" in catalogue
+    assert "repository: {host} is not an allowed source" in ui
+    assert "sniffedMessageTemplate" in ui
+    assert "manualDiagnosticTitle(x.hollow)" in ui
+    assert "manualDiagnosticTitle(x.header_detail||'')" in ui
+    assert '"Nintendo logo at 0x104, CGB flag set"' in sniff
+    assert '"Wii disc magic at 0x18"' in sniff
+    assert 'f"release profile prefers {term!r}"' in profiles
+    assert 'f"excluded by release profile ({term!r})"' in profiles
+    assert 'f"missing a required term ({term!r})"' in profiles
+    assert 'f"unknown platform: {platform_name!r}"' in app
+    assert 'f"no {platform.name} ROM found; candidate count: {len(candidates)}."' in library
+    assert 'f"two files in this download are both called {name!r}' in library
 
 
 def test_manual_import_localizes_header_label_but_preserves_dat_value():

@@ -720,8 +720,13 @@ const readInterfaceLanguage=()=>{
 };
 const translateLabel=(source,language)=>UI_LABELS[source]?.[language]||source;
 const translateTemplate=(source,values,language=readInterfaceLanguage())=>
-  translateLabel(source,language).replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g,(placeholder,name)=>
-    Object.hasOwn(values,name)?'\u2068'+String(values[name]??'')+'\u2069':placeholder);
+  translateLabel(source,language).replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g,(placeholder,name)=>{
+    if(!Object.hasOwn(values,name))return placeholder;
+    const value=values[name];
+    const text=value&&typeof value==='object'&&typeof value.source==='string'
+      ?translateTemplate(value.source,value.values||{},language):String(value??'');
+    return '\u2068'+text+'\u2069';
+  });
 const ACCOUNT_IMPORT_HELP=`Steam is a true one-click: Steam's own "Sign in through Steam", no key, no app registration — it comes straight back with your library connected. Epic, EA and Battle.net pull your owned library through the same web APIs Playnite uses — none of them issues an application key, so each opens the page your signed-in browser already has and takes one paste. GOG needs only your public profile name.`;
 const GGR_WEBHOOK_HELP=`Restart GG Requestz after changing its environment. In GG Requestz 1.5+, the webhook fires when a request becomes approved; enable request.auto_approve or approve it manually. A successful delivery now receives HTTP 202. Rejected payloads receive HTTP 422 and are named in both applications' logs.`;
 const ROMM_FRIEND_HELP=`Your friend does not need to run ROMarr. If they use RomM, ask them for an account and choose Add a RomM server. RomM publishes a hash for every ROM, so browsing and netplay matching work without installing anything on their server. The account gets the access their RomM grants; ROMarr cannot narrow it.`;
@@ -740,11 +745,168 @@ const interfaceMarkup=source=>'<span data-i18n="'+esc(source)+'">'
 const interfaceTemplateMarkup=(source,values)=>'<span data-i18n-template="'+esc(source)
   +'" data-i18n-values="'+esc(JSON.stringify(values))+'">'
   +esc(translateTemplate(source,values))+'</span>';
+const interfaceTitleTemplate=(source,values)=>'title="'+esc(translateTemplate(source,values))
+  +'" data-i18n-title-template="'+esc(source)+'" data-i18n-title-values="'
+  +esc(JSON.stringify(values))+'"';
+const sniffedMessageTemplate=value=>{
+  const source=String(value??'');
+  if(Object.hasOwn(UI_LABELS,source))return {source,values:{}};
+  let match=source.match(/^Nintendo 64 magic, (.+)$/);
+  if(match)return {source:'Nintendo 64 magic, {order}',values:{order:match[1]}};
+  match=source.match(/^TMR SEGA signature at (0x[0-9a-f]+) \(Master System or Game Gear\)$/);
+  if(match)return {source:'TMR SEGA signature at {offset} (Master System or Game Gear)',values:{offset:match[1]}};
+  match=source.match(/^(CISO|RVZ|WIA|GCZ) compressed disc image \(GameCube or Wii\)$/);
+  if(match)return {source:'{format} compressed disc image (GameCube or Wii)',values:{format:match[1]}};
+  for(const [prefix,sourceKey] of [
+    ['Sega CD boot header at ','Sega CD boot header at {offset}'],
+    ['Saturn boot header at ','Saturn boot header at {offset}'],
+    ['Dreamcast boot header at ','Dreamcast boot header at {offset}'],
+  ]){
+    if(source.startsWith(prefix)&&/^0x[0-9a-f]+$/.test(source.slice(prefix.length)))
+      return {source:sourceKey,values:{offset:source.slice(prefix.length)}};
+  }
+  return null;
+};
+const manualDiagnosticTitle=value=>{
+  const source=String(value??''),hollow=source.match(/^(\d+) of (\d+) sampled regions are empty, including the start — the file has its full size \((\d+) MB\) and almost no content, which is what an interrupted download leaves behind$/s);
+  if(hollow)return interfaceTitleTemplate(
+    '{empty} of {sampled} sampled regions are empty, including the start — the file has its full size ({size} MB) and almost no content, which is what an interrupted download leaves behind',
+    {empty:fmt(Number(hollow[1])),sampled:fmt(Number(hollow[2])),size:fmt(Number(hollow[3]))});
+  const parsed=sniffedMessageTemplate(source);
+  return parsed?interfaceTitleTemplate(parsed.source,parsed.values)
+    :'title="'+esc(source)+'" lang="und" dir="auto"';
+};
 const appMessageMarkup=value=>{
   const source=String(value??'');
-  return Object.hasOwn(UI_LABELS,source)
-    ? interfaceMarkup(source)
-    : '<span lang="und" dir="auto">'+esc(source)+'</span>';
+  if(Object.hasOwn(UI_LABELS,source)) return interfaceMarkup(source);
+  let match=source.match(/^(.+) — confirmed by the header$/s);
+  if(match){
+    const reason=sniffedMessageTemplate(match[1]);
+    if(reason)return interfaceTemplateMarkup('{reason} — confirmed by the header',{reason});
+  }
+  match=source.match(/^(.+) — chosen over (\d+) platforms sharing this extension$/s);
+  if(match){
+    const reason=sniffedMessageTemplate(match[1]);
+    if(reason)return interfaceTemplateMarkup(
+      '{reason} — chosen over {count} platforms sharing this extension',
+      {reason,count:fmt(Number(match[2]))});
+  }
+  match=source.match(/^seeders: (\d+)$/);
+  if(match)return interfaceTemplateMarkup('seeders: {count}',{count:fmt(Number(match[1]))});
+  match=source.match(/^unknown platform: (.+)$/s);
+  if(match)return interfaceTemplateMarkup('unknown platform: {platform}',{platform:match[1]});
+  match=source.match(/^search failed: (.+)$/s);
+  if(match)return interfaceTemplateMarkup('search failed: {error}',{error:match[1]});
+  match=source.match(/^No usable release was found\. Checked results: (\d+)\.$/);
+  if(match)return interfaceTemplateMarkup('No usable release was found. Checked results: {count}.',
+    {count:fmt(Number(match[1]))});
+  match=source.match(/^no usable release among (\d+) result\(s\)$/);
+  if(match)return interfaceTemplateMarkup('No usable release was found. Checked results: {count}.',
+    {count:fmt(Number(match[1]))});
+  match=source.match(/^(.+) does not exist$/s);
+  if(match)return interfaceTemplateMarkup('{path} does not exist',{path:match[1]});
+  match=source.match(/^no (.+) ROM found; candidate count: (\d+)\.$/);
+  if(match)return interfaceTemplateMarkup('no {platform} ROM found; candidate count: {count}.',
+    {platform:match[1],count:fmt(Number(match[2]))});
+  match=source.match(/^no (.+) ROM among (\d+) file\(s\)$/);
+  if(match)return interfaceTemplateMarkup('no {platform} ROM found; candidate count: {count}.',
+    {platform:match[1],count:fmt(Number(match[2]))});
+  match=source.match(/^game import failed: (.+)$/s);
+  if(match)return interfaceTemplateMarkup('game import failed: {error}',{error:match[1]});
+  match=source.match(/^download path does not exist in this container: (.+)\. Mount the download client's completed directory at that exact path, or add a remote path mapping under Settings -> Media Management\.$/s);
+  if(match)return interfaceTemplateMarkup(
+    "download path does not exist in this container: {path}. Mount the download client's completed directory at that exact path, or add a remote path mapping under Settings -> Media Management.",
+    {path:match[1]});
+  match=source.match(/^(.+) is a (\.[^ ]+) archive and bsdtar is not installed, so its contents cannot be read\. Install libarchive-tools \(Debian\/Alpine\) or use the official ROMarr image, which ships it\.$/s);
+  if(match)return interfaceTemplateMarkup(
+    '{filename} is a {extension} archive and bsdtar is not installed, so its contents cannot be read. Install libarchive-tools (Debian/Alpine) or use the official ROMarr image, which ships it.',
+    {filename:match[1],extension:match[2]});
+  match=source.match(/^two files in this download are both called (.+) \((.+) and (.+)\); refusing to guess which one the game needs$/s);
+  if(match)return interfaceTemplateMarkup(
+    'two files in this download are both called {name} ({first} and {second}); refusing to guess which one the game needs',
+    {name:match[1],first:match[2],second:match[3]});
+  match=source.match(/^in a folder named (['"])(.*)\1$/s);
+  if(match)return interfaceTemplateMarkup('in a folder named {folder}',{folder:match[2]});
+  match=source.match(/^(\.[^ ]+) is unique to it$/);
+  if(match)return interfaceTemplateMarkup('{extension} is unique to it',{extension:match[1]});
+  match=source.match(/^(\.[^ ]+) is used by (.+) -- confirm before importing$/s);
+  if(match)return interfaceTemplateMarkup(
+    '{extension} is used by {platforms} -- confirm before importing',
+    {extension:match[1],platforms:match[2]});
+  match=source.match(/^(.+) is not a directory$/s);
+  if(match)return interfaceTemplateMarkup('{path} is not a directory',{path:match[1]});
+  match=source.match(/^repository: (.+) is not an allowed source\. Allowed: (.+)\. Add it under Settings if you host your own forge\.$/s);
+  if(match)return interfaceTemplateMarkup(
+    'repository: {host} is not an allowed source. Allowed: {allowed}. Add it under Settings if you host your own forge.',
+    {host:match[1],allowed:match[2]});
+  match=source.match(/^(.+) is not an allowed source\. Allowed: (.+)\. Add it under Settings if you host your own forge\.$/);
+  if(match)return interfaceTemplateMarkup(
+    '{host} is not an allowed source. Allowed: {allowed}. Add it under Settings if you host your own forge.',
+    {host:match[1],allowed:match[2]});
+  match=source.match(/^title does not match (['"])(.*)\1$/s);
+  if(match)return interfaceTemplateMarkup('title does not match {title}',{title:match[2]});
+  match=source.match(/^blocklisted: (.+)$/s);
+  if(match)return interfaceTemplateMarkup('blocklisted: {reason}',{
+    reason:match[1]==='blocked by the operator'
+      ?{source:'blocked by the operator',values:{}}:match[1]});
+  match=source.match(/^release profile prefers (['"])(.*)\1$/s);
+  if(match)return interfaceTemplateMarkup('release profile prefers {term}',{term:match[2]});
+  match=source.match(/^excluded by release profile \((['"])(.*)\1\)$/s);
+  if(match)return interfaceTemplateMarkup('excluded by release profile ({term})',{term:match[2]});
+  match=source.match(/^missing a required term \((['"])(.*)\1\)$/s);
+  if(match)return interfaceTemplateMarkup('missing a required term ({term})',{term:match[2]});
+  match=source.match(/^looks like a hack, beta or repack \((.*)\)$/s);
+  if(match)return interfaceTemplateMarkup('looks like a hack, beta or repack ({marker})',{marker:match[1]});
+  match=source.match(/^names another platform \((.+)\)$/);
+  if(match)return interfaceTemplateMarkup('names another platform ({platform})',{platform:match[1]});
+  match=source.match(/^a PC release \((.+)\)$/);
+  if(match)return interfaceTemplateMarkup('a PC release ({marker})',{marker:match[1]});
+  match=source.match(/^trusted repacker \((.+)\)$/);
+  if(match)return interfaceTemplateMarkup('trusted repacker ({name})',{name:match[1]});
+  match=source.match(/^a compilation, not a single game \((.+)\)$/);
+  if(match)return interfaceTemplateMarkup('a compilation, not a single game ({marker})',{marker:match[1]});
+  match=source.match(/^a (.+) dump$/);
+  if(match&&match[1]==='Redump')return interfaceTemplateMarkup('a {project} dump',{project:match[1]});
+  match=source.match(/^carries a (.+) ROM extension$/);
+  if(match)return interfaceTemplateMarkup('carries a {platform} ROM extension',{platform:match[1]});
+  match=source.match(/^provider declares (.+)$/);
+  if(match)return interfaceTemplateMarkup('provider declares {platform}',{platform:match[1]});
+  match=source.match(/^names (.+)$/);
+  if(match)return interfaceTemplateMarkup('names {platform}',{platform:match[1]});
+  match=source.match(/^region ranks lower \((.+)\)$/);
+  if(match)return interfaceTemplateMarkup('region ranks lower ({region})',{region:match[1]});
+  match=source.match(/^region (.+)$/);
+  if(match&&/^(?:usa|world|europe|japan|[a-z]{1,3})$/.test(match[1]))
+    return interfaceTemplateMarkup('region {region}',{region:match[1]});
+  match=source.match(/^(.+) translation, kept as a variant$/);
+  if(match)return interfaceTemplateMarkup('{language} translation, kept as a variant',{language:match[1]});
+  match=source.match(/^(.+) translation used because no dump exists in your preferred regions$/);
+  if(match)return interfaceTemplateMarkup('{language} translation used because no dump exists in your preferred regions',{language:match[1]});
+  match=source.match(/^(.+) translation preferred over (.+)$/);
+  if(match)return interfaceTemplateMarkup('{language} translation preferred over {name}',{language:match[1],name:match[2]});
+  match=source.match(/^(.+) translation added to the set$/);
+  if(match)return interfaceTemplateMarkup('{language} translation added to the set',{language:match[1]});
+  return '<span lang="und" dir="auto">'+esc(source)+'</span>';
+};
+const searchReasonMarkup=value=>{
+  const source=String(value??''),scored=source.match(/^([+-])(\d+)\s+(.+)$/s);
+  const score=scored?'<span lang="und" dir="ltr">'+scored[1]+fmt(Number(scored[2]))+'</span> ':'';
+  const reason=scored?scored[3]:source;
+  return score+appMessageMarkup(reason);
+};
+const collectionReasonMarkup=value=>{
+  const source=String(value??'');
+  let match=source.match(/^region (.+) is (\d+) of (\d+) in your preference(; it is the parent dump)?$/);
+  if(match)return interfaceTemplateMarkup(
+    match[4]
+      ?'region {region} is {rank} of {count} in your preference; it is the parent dump'
+      :'region {region} is {rank} of {count} in your preference',
+    {region:match[1],rank:fmt(Number(match[2])),count:fmt(Number(match[3]))});
+  if(source==='no dump matched your preferred regions, so the set keeps this one rather than losing the game')
+    return interfaceMarkup(source);
+  if(source==='no dump matched your preferred regions, so the set keeps this one rather than losing the game; it is the parent dump')
+    return interfaceMarkup(source);
+  return appMessageMarkup(source);
 };
 const statusMarkup=value=>{
   const raw=String(value??''),source=DOWNLOAD_STATE_LABELS[raw];
@@ -816,6 +978,9 @@ const applyTranslatedAttributes=(root,language)=>{
         let values={};
         try{values=JSON.parse(el.getAttribute(marker+'-values')||'{}')}catch(_){continue}
         el.setAttribute(attribute,translateTemplate(template,values,language));
+        const localized=Boolean(UI_LABELS[template]?.[language]);
+        el.lang=localized?language:'en';
+        el.dir=localized&&language==='ar'?'rtl':'ltr';
         continue;
       }
       const explicit=el.getAttribute(marker),current=el.getAttribute(attribute);
@@ -1229,8 +1394,8 @@ RENDER.hub=async()=>{
           capabilities:$('#scaps').value.split(',').map(x=>x.trim()).filter(Boolean)})});
       const d=await r.json();
       if(d.problems){
-        msg.innerHTML='<div class="panel-note panel-warn"><b>Fix these:</b><br>'
-          +d.problems.map(esc).join('<br>')+'</div>';
+      msg.innerHTML='<div class="panel-note panel-warn"><b>'+interfaceMarkup('Fix these:')+'</b><br>'
+          +d.problems.map(appMessageMarkup).join('<br>')+'</div>';
       }else{
         msg.innerHTML='<div class="panel-note">'+interfaceMarkup('Ready.')+' '
           +'<a href="'+esc(d.submit_url)+'" target="_blank" rel="noopener">'
@@ -1499,7 +1664,7 @@ RENDER.add=async()=>{
     $('#g-out').innerHTML=r.ok
       ? `<div class="card" style="margin:0"><h3 data-i18n="Grabbed">Grabbed</h3>
          <p class="help"><span lang="und" dir="auto">${esc(r.release)}</span> — ${interfaceTemplateMarkup(
-           'Seeders: {count}',{count:num(r.seeders)})}</p></div>`
+           'seeders: {count}',{count:num(r.seeders)})}</p></div>`
        : `<div class="card" style="margin:0"><h3 data-i18n="Not grabbed">Not grabbed</h3>
          <p class="help">${appMessageMarkup(r.error||'no usable release')}</p></div>`;
     applyInterfaceLanguage();
@@ -1562,7 +1727,7 @@ RENDER.search=async()=>{
         <td style="white-space:nowrap">${mb(r.size)}</td>
         <td>${num(r.seeders)}</td>
         <td style="color:var(--dim)" lang="und" dir="auto">${esc(r.indexer||'—')}</td>
-        <td style="color:var(--dim);font-size:12px" lang="und" dir="auto">${r.reasons.map(esc).join('<br>')}</td>
+        <td style="color:var(--dim);font-size:12px">${r.reasons.map(searchReasonMarkup).join('<br>')}</td>
         <td><div class="rowact">${r.grabbable
           ? `<button data-grab="${esc(r.id)}" data-i18n="Grab">Grab</button>`
           : '<span style="color:var(--dim);font-size:12px">'+interfaceMarkup('No link')+'</span>'}</div></td>
@@ -2649,7 +2814,7 @@ RENDER.queue=async()=>{
     ${d.items.map((i,n)=>`<tr><td>${esc(i.game)}</td><td>${esc(i.platform)}</td>
       <td>${esc(i.release||'—')}</td><td>${num(i.seeders)}</td>
       <td><span class="pill ${esc(i.state)}">${statusMarkup(i.state)}</span>
-      ${i.detail?`<div style="color:var(--dim);font-size:11.5px">${esc(i.detail)}</div>`:''}
+      ${i.detail?`<div style="color:var(--dim);font-size:11.5px">${appMessageMarkup(i.detail)}</div>`:''}
       </td><td style="text-align:end"><div class="rowact">
         ${i.state==='failed'?`<button data-qretry="${n}">Retry</button>`:''}
         <button data-qremove="${n}">Remove</button></div></td></tr>`).join('')}
@@ -4172,11 +4337,11 @@ RENDER.collections=async()=>{
            +interfaceTemplateMarkup(t.discarded.length===1
              ?'One other dump':'{count} other dumps',{count:fmt(t.discarded.length)})+'</summary>'
            +'<ul style="margin:6px 0 0 16px">'+t.discarded.map(x=>
-             '<li class="help" style="margin:0">'+esc(x.name)+' — '+esc(x.why)+'</li>').join('')
+             '<li class="help" style="margin:0">'+esc(x.name)+' — '+collectionReasonMarkup(x.why)+'</li>').join('')
            +'</ul></details>':'';
         return '<tr><td>'+esc(t.name)
           +(t.outside_preference?' <span class="pill" title="No dump in your preferred regions; kept so the game is not lost">outside regions</span>':'')
-          +'</td><td>'+pill+'</td><td class="help" style="margin:0">'+esc(t.why)
+          +'</td><td>'+pill+'</td><td class="help" style="margin:0">'+collectionReasonMarkup(t.why)
           +clones+'</td></tr>';
       }).join('')+'</tbody></table>'
       +(d.titles.length>300?'<p class="help">'+interfaceTemplateMarkup('Showing the first {limit} of {count}.',{limit:fmt(300),count:fmt(d.titles.length)})+'</p>':'');
@@ -4223,7 +4388,7 @@ RENDER.manualimport=async()=>{
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({path:row.dataset.path,
         platform:row.querySelector('.mi-pf').value, force:!!force})})
-      .catch(()=>({ok:false,refused:[{reason:'request failed'}]}));
+      .catch(()=>({ok:false,refused:[{reason:'Could not reach ROMarr.'}]}));
 
     if(d.ok){
       const one=d.imported[0]||{};
@@ -4268,7 +4433,7 @@ RENDER.manualimport=async()=>{
            +'<td><span lang="und" dir="auto">'+esc(x.filename)+'</span></td>'
            +'<td><select class="mi-pf">'+opts(x.platform)+'</select></td>'
            +'<td class="help" style="margin:0">'+appMessageMarkup(x.reason)+'</td>'
-           +'<td>'+(x.hollow?'<span class="pill" lang="und" dir="auto" style="background:var(--bad);color:#2a0b0b" title="'+esc(x.hollow)+'">'+interfaceMarkup('EMPTY FILE')+'</span><br>':'')+verdict(x.verdict)+(x.header_says?'<br><span class="pill" lang="und" dir="auto" style="background:var(--warn);color:#2a1c05" title="'+esc(x.header_detail||'')+'">'+interfaceMarkup('Header says')+' <span lang="und" dir="auto">'+esc(x.header_says)+'</span></span>':'')+'</td>'
+           +'<td>'+(x.hollow?'<span class="pill" lang="und" dir="auto" style="background:var(--bad);color:#2a0b0b" '+manualDiagnosticTitle(x.hollow)+'>'+interfaceMarkup('EMPTY FILE')+'</span><br>':'')+verdict(x.verdict)+(x.header_says?'<br><span class="pill" lang="und" dir="auto" style="background:var(--warn);color:#2a1c05" '+manualDiagnosticTitle(x.header_detail||'')+'>'+interfaceMarkup('Header says')+' <span lang="und" dir="auto">'+esc(x.header_says)+'</span></span>':'')+'</td>'
            +'<td><button class="btn mi-go">'+interfaceMarkup('Import')+'</button></td>'
            +'<td class="mi-st help" style="margin:0"></td></tr>').join('')
          +'</tbody></table>'

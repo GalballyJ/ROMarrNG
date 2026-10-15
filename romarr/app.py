@@ -2062,7 +2062,7 @@ class ROMarr:
                     external_request_id):
                 return {"ok": False, "cancelled": True}
             item = QueueItem(game, platform.slug, "", 0, "failed",
-                             f"no usable release among {len(releases)} result(s)",
+                             f"No usable release was found. Checked results: {len(releases)}.",
                              external_request_id=external_request_id)
             self.store.enqueue(item)
             self.store.want(game, platform.slug)
