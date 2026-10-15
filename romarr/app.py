@@ -113,6 +113,7 @@ from .store import Event, QueueItem, SeerrRequest, Store
 from .ui import page as ui_page
 from .ui import link_page as ui_link_page
 from .ui import login_page as ui_login_page
+from .ui import steam_result_page as ui_steam_result_page
 
 log = logging.getLogger(__name__)
 
@@ -6195,22 +6196,19 @@ def make_handler(service: ROMarr):
 
                 if not service.connect_states.spend(
                         (query.get("state") or [""])[0]):
-                    body = ("<h2>That sign-in link has expired</h2>"
-                            "<p>Start again from Lists. "
-                            "<a href='/#lists'>Back</a></p>")
+                    body = ui_steam_result_page("expired")
                     return self._send(400, body.encode(),
                                       "text/html; charset=utf-8")
                 steam_id = steam_verify(query)
                 if not steam_id:
-                    body = ("<h2>Steam sign-in could not be verified</h2>"
-                            "<p>Nothing was connected. "
-                            "<a href='/#lists'>Back to Lists</a></p>")
+                    body = ui_steam_result_page("unverified")
                     return self._send(400, body.encode(),
                                       "text/html; charset=utf-8")
                 out = service.connect_steam(steam_id)
-                body = (f"<h2>Steam connected</h2><p>{out['message']}</p>"
-                        "<p><a href='/#lists'>Back to Lists</a></p>"
-                        "<script>location.replace('/#lists')</script>")
+                body = ui_steam_result_page("connected", out["message"]).replace(
+                    "</body>",
+                    "<script>location.replace('/#lists')</script></body>",
+                )
                 return self._send(200, body.encode(),
                                   "text/html; charset=utf-8")
             if route.path == "/api/health" and not self._authorised():

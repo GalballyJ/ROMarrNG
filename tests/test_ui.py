@@ -2,8 +2,9 @@
 
 import re
 from html.parser import HTMLParser
+from pathlib import Path
 
-from romarr.ui import page
+from romarr.ui import page, steam_result_page
 
 
 class _InlineScriptParser(HTMLParser):
@@ -35,9 +36,33 @@ def _inline_scripts(html: str) -> list[str]:
     return parser.scripts
 
 
+class _RenderedTextParser(HTMLParser):
+    """Collect rendered text without treating tag-like content as markup."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._inside_hidden_tag = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in {"script", "style"}:
+            self._inside_hidden_tag += 1
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"script", "style"} and self._inside_hidden_tag:
+            self._inside_hidden_tag -= 1
+
+    def handle_data(self, data):
+        if not self._inside_hidden_tag:
+            self.parts.append(data)
+
+
 def _text(html: str) -> str:
     """Tags stripped -- what a reader actually sees."""
-    return re.sub(r"<[^>]+>", "", html)
+    parser = _RenderedTextParser()
+    parser.feed(html)
+    parser.close()
+    return "".join(parser.parts)
 
 
 def test_inline_script_extraction_handles_browser_tolerated_end_tags():
@@ -79,9 +104,11 @@ def test_interface_language_name_is_localized_and_fallback_content_stays_english
     )
     assert selector, "the language picker needs its visible associated label"
     assert 'aria-label="Interface language"' not in selector.group(1)
-    assert 'value="ar"' not in selector.group(1)
+    assert 'value="ar"' in selector.group(1)
     assert '<html lang="en">' in html
-    assert "document.documentElement.lang='en'" in html
+    assert "document.documentElement.lang=language;" in html
+    assert "document.documentElement.dir='ltr';" in html
+    assert "el.dir=translated&&language==='ar'?'rtl':'ltr'" in html
     assert "el.lang=translated?language:'en'" in html
 
 
@@ -94,7 +121,168 @@ def test_library_and_search_labels_cover_selectable_interface_languages():
     selectable = set(re.findall(r'<option value="([^"]+)"', selector.group(1))) - {"en"}
     for label in ("On disk & catalogued", "Any source", "Enter a game name"):
         assert selectable <= UI_LABELS[label].keys(), f"{label} is missing translations"
-    assert "if(!game){toast(translateLabel('Enter a game name',readInterfaceLanguage()));return;}" in html
+    assert "if(!game){toastLabel('Enter a game name');return;}" in html
+
+
+def test_interface_catalog_covers_every_locale_and_placeholder():
+    from romarr.ui import UI_LABELS
+
+    html = page()
+    selector = re.search(r'<select id="interface-language"[^>]*>(.*?)</select>', html, re.S)
+    assert selector
+    locales = set(re.findall(r'<option value="([^"]+)"', selector.group(1))) - {"en"}
+    assert locales == {
+        "es", "zh-Hans", "hi", "de", "ja", "fr", "pt-BR", "ar",
+        "ko", "zh-Hant", "vi", "id",
+    }
+    assert "UI_LABELS[source]?.[language]||source" in html
+
+    for source, translations in UI_LABELS.items():
+        assert set(translations) == locales, f"{source} has incomplete locale coverage"
+        source_placeholders = sorted(re.findall(r"\{([A-Za-z][A-Za-z0-9_]*)\}", source))
+        for locale, translated in translations.items():
+            assert isinstance(translated, str) and translated.strip(), (
+                f"{source} is empty in {locale}"
+            )
+            translated_placeholders = sorted(
+                re.findall(r"\{([A-Za-z][A-Za-z0-9_]*)\}", translated)
+            )
+            assert translated_placeholders == source_placeholders, (
+                f"{source} has placeholder mismatch in {locale}"
+            )
+
+
+def test_static_localization_helper_sources_exist_in_every_catalog():
+    from romarr.ui import UI_LABELS
+
+    source = (Path(__file__).parents[1] / "romarr" / "ui.py").read_text(
+        encoding="utf-8"
+    )
+    call = re.compile(
+        r"\b(?:interfaceMarkup|interfaceTemplateMarkup|toastLabel|toastMessage|"
+        r"confirmMessage|promptMessage)\(\s*(['\"`])((?:\\\\.|(?!\1).)*?)\1",
+        re.S,
+    )
+    referenced = {match.group(2) for match in call.finditer(source)}
+    assert referenced <= UI_LABELS.keys(), sorted(referenced - UI_LABELS.keys())
+
+
+def test_manual_import_localizes_header_label_but_preserves_dat_value():
+    source = (Path(__file__).parents[1] / "romarr" / "ui.py").read_text(
+        encoding="utf-8"
+    )
+    assert "interfaceMarkup('Header says')" in source
+    assert """lang="und" dir="auto">'+esc(x.header_says)""" in source
+    assert """+'header says '+esc(x.header_says)""" not in source
+
+
+def test_runtime_status_fallbacks_and_generated_hub_errors_have_catalog_coverage():
+    from romarr.ui import UI_LABELS
+
+    source = (Path(__file__).parents[1] / "romarr" / "ui.py").read_text(
+        encoding="utf-8"
+    )
+    runtime_labels = {
+        "Bad",
+        "Streamed",
+        "Ready — you both have the same dump",
+        "Playable, with a caveat",
+        "Same game, different dumps",
+        "They do not have this dump",
+        "ROMarr has not hashed your copy yet",
+    }
+    assert "bad:'Bad'" in source
+    netplay = re.search(r"const head=\{(.*?)\}\[r\.status\]", source, re.S)
+    assert netplay
+    netplay_labels = set(re.findall(r":'([^']+)'", netplay.group(1)))
+    assert runtime_labels - {"Bad", "Streamed"} <= netplay_labels
+    assert netplay_labels <= UI_LABELS.keys()
+    route_labels = set(re.findall(r"routeRow\('[^']+','([^']+)'", source))
+    assert {"Browser emulator", "Streamed", "Download only"} <= route_labels
+    assert route_labels <= UI_LABELS.keys()
+    assert runtime_labels <= UI_LABELS.keys()
+
+    download_states = re.search(
+        r"const DOWNLOAD_STATE_LABELS=\{(.*?)\};", source, re.S
+    )
+    assert download_states
+    assert set(re.findall(r":'([^']+)'", download_states.group(1))) <= UI_LABELS.keys()
+
+    library_states = {"Unreachable", "Cannot read", "Path missing", "Connected"}
+    assert all(f"'{label}'" in source for label in library_states)
+    assert library_states <= UI_LABELS.keys()
+
+    actions = {"install", "enable", "disable"}
+    generated_errors = {
+        f"Could not {action} {{slug}} (HTTP {{status}})."
+        for action in actions
+    } | {
+        f"Could not {action} {{slug}}: {{error}}"
+        for action in actions
+    }
+    assert "Could not ${action} {slug} (HTTP {status})." in source
+    assert "Could not ${action} {slug}: {error}" in source
+    assert generated_errors <= UI_LABELS.keys()
+
+
+def test_static_select_labels_use_interface_catalog_markers():
+    source = (Path(__file__).parents[1] / "romarr" / "ui.py").read_text(
+        encoding="utf-8"
+    )
+    for label in (
+        "unrated",
+        "All platforms",
+        "Torrent",
+        "Usenet",
+        "Library",
+        "Wanted",
+        "Blocklist",
+        "platform (match on disk)",
+        "Base games",
+        "Updates",
+        "All three",
+    ):
+        assert f'data-i18n="{label}"' in source, (
+            f"static select option is missing its translation marker: {label}"
+        )
+    assert (
+        "const marker=Object.hasOwn(UI_LABELS,source)?` data-i18n=\"${esc(source)}\"`:'';"
+        in source
+    )
+
+
+def test_public_auth_and_invitation_messages_have_catalog_coverage():
+    from romarr.ui import UI_LABELS, link_page, login_page
+
+    sources = {
+        "This ROMarr already has a password. Sign in instead.",
+        "Use at least {count} characters.",
+        "two-factor code required or wrong",
+        "Send the link however you like -- it carries no secret. Send the code separately if you can: by voice, by text, in another app. It works once, expires in 15 minutes, and you still confirm the peer here before they can see anything.",
+        "This invitation carries no address for your server, so your friend's ROMarr cannot call you back. Set your public URL under Settings -> General, then mint a fresh invitation.",
+        "the claim code is missing. It travels separately from the link on purpose -- ask your friend for the eight characters",
+        "that claim code has expired -- ask your friend for a fresh one, it only lives 15 minutes",
+        "Connected to {friend}. They confirm you on their side before you can see anything.",
+        "Connected to {friend}: {count} title with hashes ROMarr can match on.",
+        "Connected to {friend}: {count} titles with hashes ROMarr can match on.",
+    }
+    assert sources <= UI_LABELS.keys()
+
+    setup = login_page(claimed=False)
+    assert "Use at least {count} characters." in setup
+    assert "window.ROMarrI18n.has(detail)" in setup
+    invitation = link_page()
+    assert "Checking this invitation…" in invitation
+    assert "window.ROMarrI18n.translate(msg)" in invitation
+
+
+def test_standalone_steam_result_uses_public_localization_and_escapes_message():
+    page_html = steam_result_page("connected", "<img src=x onerror=alert(1)>")
+    assert 'data-i18n="Steam connected"' in page_html
+    assert 'data-i18n="Back to Lists"' in page_html
+    assert "romarrng.interface-language" in page_html
+    assert 'lang="und" dir="auto">&lt;img src=x onerror=alert(1)&gt;' in page_html
+    assert "<img src=x onerror=alert(1)>" not in page_html
 
 
 def test_interface_language_choice_survives_storage_failure_for_current_tab():
@@ -135,10 +323,25 @@ globalThis.localStorage = {
 globalThis.window = {
   addEventListener: (_name, handler) => { syncLanguage = handler; }
 };
+globalThis.Node = {ELEMENT_NODE: 1, TEXT_NODE: 3};
+globalThis.NodeFilter = {SHOW_TEXT: 4};
+globalThis.MutationObserver = class {
+  observe() {}
+};
+const emptyElement = {
+  nodeType: Node.ELEMENT_NODE,
+  matches: () => false,
+  closest: () => null,
+  getAttribute: () => null,
+  querySelectorAll: () => []
+};
 globalThis.document = {
   documentElement: {},
+  nodeType: 9,
+  body: emptyElement,
   querySelector: name => name === "#interface-language" ? selector : null,
-  querySelectorAll: () => []
+  querySelectorAll: () => [],
+  createTreeWalker: () => ({nextNode: () => false})
 };
 """ + language_helpers + change_handler + r"""
 selector.value = "de";
@@ -221,10 +424,13 @@ def test_the_system_page_explains_and_builds_the_ggrequestz_webhook():
 def test_plugin_install_errors_are_displayed_in_the_hub():
     """A failed install used to refresh the catalogue and erase the API error."""
     html = page()
-    assert "let q='', cap='', inst='', actionError=''" in html
+    assert "let q='', cap='', inst='', actionError=null" in html
     assert "if(!r.ok||result.ok!==true)" in html
-    assert "actionError=result.error||result.reason" in html
-    assert "esc(actionError)" in html
+    assert "const detail=result.error||result.reason" in html
+    assert "actionError=detail?{raw:detail}" in html
+    assert "actionError.source" in html
+    assert "interfaceTemplateMarkup(actionError.source,actionError.values)" in html
+    assert "<span lang=\"und\" dir=\"auto\">" in html
 
 
 def test_every_rendered_inline_script_parses_as_javascript():
@@ -292,7 +498,7 @@ const writeFailureResult = applyRegionalFormat(failedWriteControl.value, failedW
 const failedWriteMarkup = regionalFormatField();
 const writeFailureHandled = writeFailureResult
   && failedWriteControl.value === "ja" && getRegionalLocale() === "ja"
-  && failedWriteMarkup.includes('value="ja" selected')
+  && /value="ja"[^>]* selected/.test(failedWriteMarkup)
   && refreshCountCalls === refreshAfterSave + 1;
 storageWritable = true;
 applyRegionalFormat("de");
@@ -324,7 +530,7 @@ const storageFailureResult = applyRegionalFormat(failedControl.value, failedCont
 const failedStorageMarkup = regionalFormatField();
 const storageFailureHandled = storageFailureResult
   && failedControl.value === "ja" && getRegionalLocale() === "ja"
-  && failedStorageMarkup.includes('value="ja" selected')
+  && /value="ja"[^>]* selected/.test(failedStorageMarkup)
   && refreshCountCalls === refreshBeforeStorageFailure + 1;
 storageAvailable = true;
 const expectedDate = new Intl.DateTimeFormat("de", {
@@ -367,7 +573,7 @@ console.log(JSON.stringify({
   storedAfterSystemReset,
   accessible: selectedMarkup.includes('aria-describedby="g-regional-format-help"')
     && selectedMarkup.includes('id="g-regional-format-help"'),
-  germanOptionSelected: selectedMarkup.includes('value="de" selected'),
+  germanOptionSelected: /<option value="de"[^>]* selected>/.test(selectedMarkup),
   systemOptionSelected: /<option value="system"[^>]* selected>/.test(systemMarkup)
     && systemMarkup.includes('data-i18n="Use browser settings"')
 }));
@@ -417,19 +623,21 @@ def test_regional_formatting_is_applied_at_dashboard_count_call_sites():
     assert "regionalFormat.onchange=()=>{\n      applyRegionalFormat(regionalFormat.value,regionalFormat);" in html
     assert "if(setRegionalLocale(regionalFormat.value)) go('general')" not in html
     assert "★ ${num(x.rating)}" in html
-    assert "Clear ${fmt(failed)} failed" in html
+    assert "'Clear {count} failed'" in html
     assert "<div><b>${fmt(h.platforms)}</b><span>Platforms</span></div>" in html
     assert "<div><b>${fmt(h.dats||0)}</b><span>DATs loaded</span></div>" in html
     assert "<div><b>${fmt(h.dat_games||0)}</b><span>Known dumps</span></div>" in html
     assert "<div><b>${fmt(h.events)}</b><span>History events</span></div>" in html
-    assert "+fmt(x.percent)+'% — '+esc(x.status)" in html
+    assert "+fmt(x.percent)+'% — '+statusMarkup(x.status)" in html
     assert "+fmt(x.done)+'</td><td>'+fmt(x.failed)+'</td><td>'+fmt(x.remaining)" in html
-    assert ">Page ${fmt(page)} of ${fmt(pages)}</span>" in html
+    assert "interfaceTemplateMarkup('Page {page} of {pages}'" in html
     assert "${fmt(r.local||0)}" in html
     assert "${fmt(r.stream||0)}" in html
     assert "${fmt(r.archive||0)}" in html
     assert "${fmt(r.download_only||0)}" in html
-    assert "${fmt(Math.max(0,Math.round((r.code_expires_in||0)/60)))} min" in html
+    assert "minutes:fmt(Math.max(0,Math.round((r.code_expires_in||0)/60)))" in html
+    assert "Math.max(1,Math.round(left/60))" in html
     assert "fmt(p.max_size_mb/1024)+' GB' : fmt(p.max_size_mb)+' MB'" in html
-    assert "${fmt(s/60)} min" in html and "${fmt(s)} s" in html
-    assert "Disabled until ${esc(regionalDateTime(item.disabledUntil))}" in html
+    assert "interfaceTemplateMarkup('Interval: {count} min'" in html
+    assert "interfaceTemplateMarkup('Interval: {count} s'" in html
+    assert "interfaceTemplateMarkup('Disabled until {date}'" in html

@@ -78,7 +78,7 @@ full claim-by-claim evidence file.*
 - [Upstream backlog work](#upstream-backlog-work) — [implementation report](docs/UPSTREAM_IMPLEMENTATION_REPORT.md), [48-item audit](docs/UPSTREAM_AUDIT.md), [SeerrNG contract](docs/SEERRNG-INTEGRATION.md)
 - [Cartridge ecosystem](#cartridge-ecosystem)
 - [Why ROMarrNG is maintained](docs/UPSTREAM-PARITY.md)
-- [Localization roadmap](docs/localization-roadmap.md) — locale coverage, browser formatting, deferred Arabic RTL support, and remaining work
+- [Localization roadmap](docs/localization-roadmap.md) — locale coverage, browser formatting, and Arabic RTL review findings
 
 ---
 

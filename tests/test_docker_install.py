@@ -290,7 +290,7 @@ def test_public_workflow_uses_org_pool_only_for_trusted_main():
     expected_runner = (
         "runs-on: " + "$" + "{{ (" + trusted_condition
         + " && vars.TRUSTED_MAIN_RUNNERS_ENABLED == 'true' "
-        + "&& fromJSON('" + trusted_runner_json + "') || 'ubuntu-latest' }}"
+        + "&& fromJSON('" + trusted_runner_json + "')) || 'ubuntu-latest' }}"
     )
     assert expected_runner in test_job
 
