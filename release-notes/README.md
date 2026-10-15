@@ -1,6 +1,7 @@
 # Release-note fragments
 
-Add one Markdown fragment for every user-facing change. Release preparation
+For any user-facing change, add one structured fragment under `release-notes/` describing it. A
+single fragment may cover related user-facing changes in the same pull request. Keep shipped fragments unchanged. Release preparation
 adds these fragments to `CHANGELOG.md`; the tag workflow includes them in the
 GitHub Release body and ROMarrNG announcement in the SeerrNG Discord channel.
 
@@ -41,14 +42,10 @@ shipped history. Preview a pull request's rendered notes with:
 python scripts/release_notes.py preview --base origin/main --head HEAD
 ```
 
-For an internal-only change, check the internal-only option in the pull request
-template or put `release-note: none` in the pull request description. Also put
-that marker in the squash-merge commit body: the main-branch push check reads
-the commit message rather than the original pull request description. With
-`gh`, pass `--body "release-note: none"` when merging. Direct pushes to `main`
-use the commit message for the same opt-out. User-facing
-features, fixes, security changes, operational behavior changes, and user-facing
-documentation still need a fragment.
+For internal-only work, no fragment is needed. In a pull request, either select the internal-only
+option in the template or put `release-note: none` on its own line in the description. When a
+direct push or merge check reads commit messages, put the same marker on its own line in the
+commit message.
 
 When preparing a release, update `romarr/app.py` to the release version, then
 generate and prepend its changelog section from the fragments since the prior
@@ -72,7 +69,6 @@ Use the actual next version, previous stable tag, and release date. Commit the
 version and changelog preparation before creating the matching `v$VERSION`
 tag. The tag workflow publishes the release and sends
 the same release notes to Discord. `DISCORD_RELEASE_WEBHOOK` in the ROMarrNG
-repository must point to the same webhook as SeerrNG. The release-preparation
-commit itself is internal tooling work, so include `release-note: none` in its
-commit message for a direct push. When using a pull request, include the marker
-in both the pull request description and squash-merge commit body.
+repository must point to the same webhook as SeerrNG. The release-preparation commit is internal-only and needs no fragment. Use the
+internal-only template option or the PR marker, and include the commit marker when
+the main-branch check reads the squash-merge commit body.
