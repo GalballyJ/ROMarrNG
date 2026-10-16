@@ -19,7 +19,7 @@ This is a practical rollout order, not a claim about these apps' actual user bas
 5. Japanese (ja)
 6. French (fr)
 7. Brazilian Portuguese (pt-BR)
-8. Arabic (ar; requires right-to-left layout support)
+8. Arabic (ar; selectable, with full right-to-left layout support still under review)
 9. Korean (ko)
 10. Traditional Chinese (zh-Hant / zh-TW)
 11. Vietnamese (vi)

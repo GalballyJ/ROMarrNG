@@ -6,6 +6,10 @@ Scope: all 48 issues/PRs returned by the paginated GitHub API, including closed 
 Machine-readable inventory: [upstream-audit.json](upstream-audit.json).
 For the implementation summary, merge and test evidence, SeerrNG impact, and
 remaining verification limits, see the [upstream implementation report](UPSTREAM_IMPLEMENTATION_REPORT.md).
+This 48-item inventory remains a snapshot of the upstream issue/PR queue on
+2026-10-12. The current upstream capability and retirement comparison is kept
+separately in [UPSTREAM-PARITY.md](UPSTREAM-PARITY.md), checked against upstream
+`main` at `4ad0ada` on 2026-10-16.
 
 “Existing coverage” means implementation and relevant regression coverage exist in this fork;
 it does not mean this session recreated the reporter's deployment. “Implemented/adapted”

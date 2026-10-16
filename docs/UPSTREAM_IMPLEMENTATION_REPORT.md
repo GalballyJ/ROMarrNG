@@ -8,6 +8,13 @@ The complete point-in-time inventory is the
 [upstream audit](UPSTREAM_AUDIT.md), with machine-readable data in
 [upstream-audit.json](upstream-audit.json).
 
+The release work later passed its required hosted gates and ROMarrNG
+[v0.14.10](https://github.com/snapetech-org/ROMarrNG/releases/tag/v0.14.10)
+was published on 2026-10-13. The queued-checks note below records the state at
+merge time; it is not the current release status. The 48-item issue inventory
+remains historical, while the current upstream cutover comparison is in
+[UPSTREAM-PARITY.md](UPSTREAM-PARITY.md).
+
 ## Result and scope
 
 The paginated GitHub inventory contained **48 items: 25 issues and 23 pull
