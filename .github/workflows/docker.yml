@@ -58,22 +58,11 @@ jobs:
   test:
     # Pull requests and tags stay hosted. The organization runner group is
     # server-restricted to this workflow on main before trusted main runs use it.
-    runs-on: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && vars.TRUSTED_MAIN_RUNNERS_ENABLED == 'true' && fromJSON('{"group":"trusted-main","labels":["self-hosted","Linux","X64","host"]}')) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Test private runner temporary storage setup
-        if: runner.os == 'Linux'
-        run: ./scripts/test-private-runner-temp.sh
-
-      - name: Configure private runner temporary storage
-        id: private-runner-temp
-        if: runner.os == 'Linux'
-        env:
-          PRIVATE_RUNNER_TEMP_PREFIX: romarr
-        run: ./scripts/prepare-private-runner-temp.sh
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -82,7 +71,7 @@ jobs:
       - name: Run source-bound pytest validation
         env:
           VALIDATION_NODE_ID: romarrng-pytest-linux
-          VALIDATION_RECEIPT_EXPORT: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+          VALIDATION_RECEIPT_EXPORT: ${{ runner.temp }}/romarr-validation/pytest.json
         run: python3.13 -m scripts.validation_engine.engine --tests-only
 
       - name: Retain pytest validation receipt
@@ -90,7 +79,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: romarrng-validation-receipt-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+          path: ${{ runner.temp }}/romarr-validation/pytest.json
           if-no-files-found: warn
           retention-days: 7
   validation-environment-portability:

@@ -42,16 +42,10 @@ planning imports candidate validation configuration.
 GitHub Actions remains responsible for receipt-backed validation.
 
 In CI, `--plan` discovers files and required commands without installing
-packages or running pytest. Pull requests, version-tag pushes, and manual runs
-outside main use GitHub-hosted runners. Trusted pushes to main and manual runs
-targeting main use the shared organization runner pool only when the repository
-variable `TRUSTED_MAIN_RUNNERS_ENABLED` is `true`; otherwise the Linux pytest job
-uses `ubuntu-latest`. The organization runner group is restricted server-side to
-snapetech-org/ROMarrNG/.github/workflows/docker.yml@refs/heads/main. That policy
-prevents pull-request versions of this public workflow from selecting the
-persistent pool, while the workflow expression keeps PRs, tags, and non-main
-manual runs hosted. Pushes to other branches do
-not trigger this workflow. The Linux validation job uses `setup-python`
+packages or running pytest. All workflow events use GitHub-hosted runners. The
+Linux validation job uses `setup-python` with Python 3.13 and creates its
+temporary workspace beneath
+The Linux validation job uses `setup-python`
 with Python 3.13 and creates its temporary workspace beneath
 `RUNNER_TEMP`. It uses the validation engine to install repository
 requirements, pytest, and test-only PyYAML in a task environment before
