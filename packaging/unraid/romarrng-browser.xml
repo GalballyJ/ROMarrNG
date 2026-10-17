@@ -3,8 +3,8 @@
      standard ROMarrNG template; both use the same appdata and web port. -->
 <Container version="2">
   <Name>ROMarrNG-Browser</Name>
-  <Repository>ghcr.io/snapetech/romarrng:browser</Repository>
-  <Registry>https://ghcr.io/snapetech/romarrng</Registry>
+  <Repository>ghcr.io/snapetech-org/romarrng:main-browser</Repository>
+  <Registry>https://ghcr.io/snapetech-org/romarrng</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>

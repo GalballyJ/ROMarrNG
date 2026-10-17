@@ -698,4 +698,4 @@ def test_the_status_page_renders_the_host_and_the_manual_step():
     assert "moonlightCard" in rendered
     assert "/api/v1/moonlight/pin" in rendered
     # The UI must never call it "Paired" off the back of a submission.
-    assert "cannot start the stream for you" in rendered
+    assert "ROMarr checks {path} on the Moonlight port" in rendered
