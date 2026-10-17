@@ -56,8 +56,7 @@ jobs:
           python scripts/release_notes.py check-changelog-tags
 
   test:
-    # Pull requests and tags stay hosted. The organization runner group is
-    # server-restricted to this workflow on main before trusted main runs use it.
+    # Keep the complete test gate on a GitHub-hosted Linux runner.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
