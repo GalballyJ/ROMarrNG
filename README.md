@@ -27,6 +27,9 @@ switch back.
 
 Support ROMarrNG on [Ko-fi](https://ko-fi.com/snapetech).
 
+For local MCP access, see the [SnapeTech MCP integration guide](docs/integrations/snapetech-mcp.md).
+
+
 On Unraid, the [ROMarrNG fork template](packaging/unraid/romarrng.xml) installs
 the standalone `ghcr.io/snapetech/romarrng:latest` image. Map persistent
 appdata to `/config`, your game library to `/roms`, and completed downloads to
@@ -77,8 +80,8 @@ full claim-by-claim evidence file.*
 - [Release history](CHANGELOG.md)
 - [Upstream backlog work](#upstream-backlog-work) — [implementation report](docs/UPSTREAM_IMPLEMENTATION_REPORT.md), [48-item audit](docs/UPSTREAM_AUDIT.md), [SeerrNG contract](docs/SEERRNG-INTEGRATION.md)
 - [Cartridge ecosystem](#cartridge-ecosystem)
-- [Why ROMarrNG is maintained](docs/UPSTREAM-PARITY.md)
-- [Localization roadmap](docs/localization-roadmap.md) — locale coverage, browser formatting, deferred Arabic RTL support, and remaining work
+- [Why ROMarrNG is maintained](docs/UPSTREAM-PARITY.md) — current upstream exit matrix
+- [Localization roadmap](docs/localization-roadmap.md) — locale coverage, browser formatting, and Arabic RTL review findings
 
 ---
 
@@ -276,6 +279,20 @@ download queue, shelf and settings all survive restarts. Prowlarr's API
 keys never reach a browser or a log, archives cannot zip-slip out of the
 library root, and an existing ROM is never silently overwritten.
 
+### Pick your language and number format
+
+The rail footer lets each browser choose English or one of twelve other
+interface languages. The catalog covers navigation, settings, help, validation,
+Library and request workflows, manual import, release and collection
+explanations, plugin-source checks, and download/import diagnostics. Missing
+translations fall back to English; game titles, platform names, paths, API
+values, and other user data stay as entered. The separate regional-format
+setting controls dates, counts, ratings, scores, and file sizes without changing
+the interface language. Both choices stay in that browser. Arabic labels carry
+right-to-left metadata, while full right-to-left layout support remains under
+review. See the [localization notes](docs/localization-roadmap.md) for coverage
+and limits.
+
 ## Requirements
 
 | | |
@@ -339,6 +356,12 @@ key still refer to the same loaded entry. The status response reports `retry`
 and `cancel` actions that reflect ROMarrNG's current state. See the full
 [SeerrNG integration contract](docs/SEERRNG-INTEGRATION.md) for response
 fields, limits, and retry behavior.
+
+Imported asset listings report `datVerified` as `true`, `false`, or `null` when
+ROMarrNG can provide a verdict; the handshake advertises this as
+`assetDatVerification`. This distinguishes a known DAT match, a hashed file
+outside the loaded DATs, and a file with no available verdict. It is separate
+from whether a library server has indexed the file.
 
 Prowlarr diagnostics are available from the Indexers page and
 `POST /api/v1/indexer/diagnose`. They report the management API separately
@@ -1024,6 +1047,11 @@ The snapshot covered 48 items: 34 already had implementation and regression
 coverage here, 11 needed code changes or adaptations, and 3 were addressed by
 verifying the public image manifests and correcting fork references. The
 item-by-item inventory records the evidence and the limits for each report.
+That inventory remains a 2026-10-12 snapshot. The separate upstream exit matrix
+was rechecked on 2026-10-16 against upstream ROMarr v1.6.0 at
+[`4ad0ada`](https://github.com/BlizzHacker/romarr/commit/4ad0ada8e72cbe0e7fcab48fab6cf17d5beb6441),
+including the generic external-request API now available there and the remaining
+gaps in SeerrNG's versioned catalog, request, and delivery contract.
 
 The implementation closed the remaining code gaps in Switch cataloguing,
 Hub-powered Interactive Search, strict 1G1R region and translation filtering,
@@ -1056,14 +1084,10 @@ An honest map of what is solid, what is thin, and where a contribution
 lands hardest. CI validates pull requests, pushes to `main`, and version-tag
 pushes; manual runs may target any ref. Pushes to other branches do not trigger
 the Docker workflow. Pull requests, version tags, and manual runs outside main
-use GitHub-hosted runners. The Linux `test` job may use the organization
-`trusted-main` runner group for main pushes and main manual runs only when
-`TRUSTED_MAIN_RUNNERS_ENABLED` is `true`; otherwise it uses `ubuntu-latest`.
-The group is restricted server-side to this workflow on `refs/heads/main`. PR image builds use
-read-only permissions; only main and version-tag
-workflows, plus manual runs on main, can publish images. In the
-2026-10-12 local full-suite run, 2,319 tests passed, 3 were skipped, and 1
-network test was deselected.
+use GitHub-hosted runners. All Linux pytest jobs run on GitHub-hosted `ubuntu-latest` runners. PR image builds
+use read-only permissions; only main and version-tag workflows, plus manual runs
+on main, can publish images. In the 2026-10-12 local full-suite run, 2,319 tests
+passed, 3 were skipped, and 1 network test was deselected.
 The numbers below are per area, and "tested against fakes" means the protocol
 conversation is asserted but no live server was in the loop.
 

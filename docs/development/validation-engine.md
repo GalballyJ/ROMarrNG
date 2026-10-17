@@ -42,32 +42,18 @@ planning imports candidate validation configuration.
 GitHub Actions remains responsible for receipt-backed validation.
 
 In CI, `--plan` discovers files and required commands without installing
-packages or running pytest. Pull requests, version-tag pushes, and manual runs
-outside main use GitHub-hosted runners. Trusted pushes to main and manual runs
-targeting main use the shared organization runner pool only when the repository
-variable `TRUSTED_MAIN_RUNNERS_ENABLED` is `true`; otherwise the Linux pytest job
-uses `ubuntu-latest`. The organization runner group is restricted server-side to
-snapetech-org/ROMarrNG/.github/workflows/docker.yml@refs/heads/main. That policy
-prevents pull-request versions of this public workflow from selecting the
-persistent pool, while the workflow expression keeps PRs, tags, and non-main
-manual runs hosted. Pushes to other branches do
-not trigger this workflow. The Linux validation job uses `setup-python` with
-Python 3.13 on GitHub-hosted runners. On the trusted Arch Linux pool, it installs a pinned uv
-CLI and uses it to install managed Python 3.13 beneath the job's private
-`RUNNER_TEMP` directory, then adds that interpreter to the job path. This keeps
-the test runtime independent of the runner distribution and avoids global
-installation paths. The job uses the validation engine to install repository
-requirements, pytest, and test-only PyYAML in a task environment before running
-the native suite. The engine divides discovered test files into four
+packages or running pytest. All workflow events use GitHub-hosted runners. The
+Linux validation job uses `setup-python` with Python 3.13 and creates its
+private workspace beneath `RUNNER_TEMP`. The engine installs repository
+requirements, pytest, and test-only PyYAML in a disposable task environment
+before running the native suite. It divides discovered test files into four
 disjoint inventory shards and runs at most two shards at once after dependency
-installation completes. Each shard has its own environment and log, and
-disables pytest's shared cache plugin. The test tasks use `pytest.ini` as
-configured, including its default `not network` marker, so tests that reach the
-public internet remain deselected. The engine counts passed, skipped, failed,
-and deselected cases from every pytest summary, records each shard's file
-inventory in one receipt, and does not call an empty run successful. Image
-validation reconciles every shard against that same source receipt before
-building.
+installation. Each shard has its own environment and log and disables pytest's
+shared cache plugin. The shards use `pytest.ini` as configured, including its
+default `not network` marker, so tests that reach the public internet remain
+deselected. The engine counts passed, skipped, failed, and deselected cases
+from every shard, records the file inventory in one receipt, and does not call
+an empty run successful.
 
 Pull-request image jobs smoke-test the Alpine image and build the browser
 image for its supported platforms, all with read-only repository permissions.
@@ -78,7 +64,7 @@ tags after both published images succeed.
 
 The engine writes a compact task summary to stderr at task start and completion,
 with a once-per-minute heartbeat during long tasks. Counts cover completed
-tasks; all active tasks and their elapsed times are shown separately. GitHub publishes
+tasks; the active task and elapsed time are shown separately. GitHub publishes
 workflow step summaries after the step finishes, so live progress appears in
 the step log.
 
@@ -105,14 +91,15 @@ without `CAP_SYS_PTRACE`; the engine refuses to start a task when that boundary
 cannot be enforced or the runner's original dumpability state cannot be
 restored.
 
-The CI job exports a short-lived receipt with the absolute path to its private
-evidence directory and any receipt-verified failed shard logs from the Linux x64
-pytest runner. Successful shard logs remain in private runner storage. The image
-job checks the receipt's run ID, attempt, commit,
-runner identity, case count, and inventory digest against the image job's own
-checkout before building an image.
-This confirms the artifact came from the current workflow attempt and the same
-source snapshot; it does not replace the local test evidence.
+The CI job exports a short-lived receipt from the Linux x64 pytest runner. After
+validation, `retain_failed_pytest_logs` checks each failed task's log path and
+SHA-256 digest against that receipt before staging it for the workflow artifact.
+Successful shard logs stay in private runner storage. The artifact contains the
+receipt, a manifest, and failed shard logs, with seven-day retention. The image
+job checks the receipt's run ID, attempt, commit, runner identity, case count,
+and inventory digest against the image job's own checkout before building an
+image. This confirms the artifact came from the current workflow attempt and
+the same source snapshot; it does not replace the local test evidence.
 
 The `install-test-dependencies` task runs only in hosted CI. Running the engine's
 `--tests-only` selection locally is intentionally refused because it includes

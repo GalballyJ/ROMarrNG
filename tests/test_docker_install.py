@@ -271,7 +271,7 @@ def test_the_install_guide_exists_and_the_readme_sends_people_to_it():
     assert "docs/INSTALL.md" in README.read_text(encoding="utf-8"), (
         "the full install guide is unreachable from the README")
 
-def test_public_workflow_uses_org_pool_only_for_trusted_main():
+def test_public_test_job_uses_github_hosted_runner():
     workflow = (ROOT / ".github" / "workflows" / "docker.yml").read_text(
         encoding="utf-8"
     )
@@ -282,22 +282,5 @@ def test_public_workflow_uses_org_pool_only_for_trusted_main():
     test_job = workflow.split("  test:\n", 1)[1].split(
         "\n  validation-environment-portability:", 1
     )[0]
-    trusted_condition = (
-        "((github.event_name == 'push' && github.ref == 'refs/heads/main') "
-        "|| (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))"
-    )
-    trusted_runner_json = '{"group":"trusted-main","labels":["self-hosted","Linux","X64","host"]}'
-    expected_runner = (
-        "runs-on: " + "$" + "{{ (" + trusted_condition
-        + " && vars.TRUSTED_MAIN_RUNNERS_ENABLED == 'true' "
-        + "&& fromJSON('" + trusted_runner_json + "')) || 'ubuntu-latest' }}"
-    )
-    assert expected_runner in test_job
-
-    assert "prepare-private-runner-temp.sh" in test_job
-    assert "PRIVATE_RUNNER_TEMP_PREFIX: romarr" in test_job
-    assert "persist-credentials: false" in test_job
-    helper = (ROOT / "scripts" / "prepare-private-runner-temp.sh").read_text(
-        encoding="utf-8"
-    )
-    assert 'chmod 700 -- "$current"' in helper
+    assert re.search(r"(?m)^    runs-on: ubuntu-latest$", test_job)
+    assert "runs-on: ${{" not in test_job

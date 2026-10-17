@@ -56,65 +56,28 @@ jobs:
           python scripts/release_notes.py check-changelog-tags
 
   test:
-    # Pull requests and tags stay hosted. The organization runner group is
-    # server-restricted to this workflow on main before trusted main runs use it.
-    runs-on: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && vars.TRUSTED_MAIN_RUNNERS_ENABLED == 'true' && fromJSON('{"group":"trusted-main","labels":["self-hosted","Linux","X64","host"]}')) || 'ubuntu-latest' }}
+    # Keep the complete test gate on a GitHub-hosted Linux runner.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Test private runner temporary storage setup
-        if: runner.os == 'Linux'
-        run: ./scripts/test-private-runner-temp.sh
-
-      - name: Configure private runner temporary storage
-        id: private-runner-temp
-        if: runner.os == 'Linux'
-        env:
-          PRIVATE_RUNNER_TEMP_PREFIX: romarr
-        run: ./scripts/prepare-private-runner-temp.sh
-
-      - name: Set up Python 3.13 on GitHub-hosted runners
-        if: runner.environment == 'github-hosted'
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-
-      # setup-python's Linux builds target GitHub-hosted distributions. The Arch pool
-      # runner installs a managed interpreter beneath this job's private temp path.
-      - name: Install uv for the self-hosted Python runtime
-        if: runner.environment == 'self-hosted'
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: "0.13.0"
-          enable-cache: false
-
-      - name: Install Python 3.13 in private runner storage
-        if: runner.environment == 'self-hosted'
-        env:
-          UV_CACHE_DIR: ${{ steps.private-runner-temp.outputs.path }}/uv-cache
-          UV_PYTHON_INSTALL_DIR: ${{ steps.private-runner-temp.outputs.path }}/python
-        run: |
-          set -euo pipefail
-          umask 077
-          uv python install 3.13
-          python_bin="$(uv python find 3.13)"
-          [[ "$python_bin" == "$UV_PYTHON_INSTALL_DIR/"* && -x "$python_bin" ]]
-          printf '%s\n' "$(dirname "$python_bin")" >> "$GITHUB_PATH"
-          "$python_bin" --version
 
       - name: Run source-bound pytest validation
         env:
           VALIDATION_NODE_ID: romarrng-pytest-linux
-          VALIDATION_RECEIPT_EXPORT: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+          VALIDATION_RECEIPT_EXPORT: ${{ runner.temp }}/romarr-validation/pytest.json
         run: python3.13 -m scripts.validation_engine.engine --tests-only
 
       - name: Stage failed pytest task logs
         if: always()
         env:
-          PRIVATE_RUNNER_TEMP: ${{ steps.private-runner-temp.outputs.path || runner.temp }}
-          VALIDATION_RECEIPT_EXPORT: ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
+          PRIVATE_RUNNER_TEMP: ${{ runner.temp }}
+          VALIDATION_RECEIPT_EXPORT: ${{ runner.temp }}/romarr-validation/pytest.json
         run: python3.13 -m scripts.validation_engine.retain_failed_pytest_logs
 
       - name: Retain pytest validation receipt and failed task logs
@@ -123,9 +86,9 @@ jobs:
         with:
           name: romarrng-validation-receipt-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/pytest.json
-            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/failed-task-logs/manifest.json
-            ${{ steps.private-runner-temp.outputs.path || runner.temp }}/romarr-validation/failed-task-logs/*.log
+            ${{ runner.temp }}/romarr-validation/pytest.json
+            ${{ runner.temp }}/romarr-validation/failed-task-logs/manifest.json
+            ${{ runner.temp }}/romarr-validation/failed-task-logs/*.log
           if-no-files-found: warn
           retention-days: 7
   validation-environment-portability:
@@ -158,6 +121,7 @@ jobs:
     if: github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         dockerfile: [Dockerfile, Dockerfile.browser]
     steps:
@@ -358,6 +322,7 @@ jobs:
             org.opencontainers.image.description=ROMarrNG adds a SeerrNG request and library contract to ROMarr
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=main,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -469,6 +434,7 @@ jobs:
             org.opencontainers.image.description=ROMarrNG on Debian with the Playwright client for the Headless Browser download client
           tags: |
             type=raw,value=browser,enable={{is_default_branch}}
+            type=raw,value=main-browser,enable={{is_default_branch}}
             type=semver,pattern={{version}}-browser
             type=semver,pattern={{major}}.{{minor}}-browser
             type=sha,format=short,suffix=-browser
