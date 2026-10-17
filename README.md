@@ -27,6 +27,9 @@ switch back.
 
 Support ROMarrNG on [Ko-fi](https://ko-fi.com/snapetech).
 
+For local MCP access, see the [SnapeTech MCP integration guide](docs/integrations/snapetech-mcp.md).
+
+
 On Unraid, the [ROMarrNG fork template](packaging/unraid/romarrng.xml) installs
 the standalone `ghcr.io/snapetech/romarrng:latest` image. Map persistent
 appdata to `/config`, your game library to `/roms`, and completed downloads to
