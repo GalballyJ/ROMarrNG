@@ -20,6 +20,57 @@ TRUSTED_MAIN_RUNNER = (
 )
 
 
+PUBLIC_FORK_VALIDATION_RUNNER = (
+    "$" + "{{ github.event_name == 'pull_request' "
+    "&& github.event.pull_request.head.repo.fork == true "
+    "&& github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name "
+    "&& github.event.pull_request.base.repo.full_name == 'snapetech-org/ROMarrNG' "
+    "&& github.event.pull_request.base.ref == 'main' "
+    "&& fromJSON('[\"self-hosted\", \"linux\", \"x64\", \"public-pr-romarrng\"]') "
+    "|| 'ubuntu-latest' }}"
+)
+PUBLIC_FORK_CALLER_CONDITION = (
+    "github.event.pull_request.head.repo.fork == true && "
+    "github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name && "
+    "github.event.pull_request.base.repo.full_name == 'snapetech-org/ROMarrNG' && "
+    "github.event.pull_request.base.ref == 'main'"
+)
+PUBLIC_FORK_CALLER_USES = (
+    "snapetech-org/ROMarrNG/.github/workflows/fork-safe-validation.yml"
+    "@5e8027f52c89f8089d13b97c5cd54a10998134ad"
+)
+
+
+def _is_approved_public_fork_caller(
+    workflow: Path, job_name: str, job: dict, document: dict
+) -> bool:
+    workflow_events = document.get("on")
+    if workflow_events is None:
+        workflow_events = document.get(True)
+    pull_request = {
+        "branches": ["main"],
+        "types": ["opened", "synchronize", "reopened", "ready_for_review"],
+    }
+    expected_concurrency = {
+        "group": "public-fork-pr-" + "$" + "{{ github.event.pull_request.number }}",
+        "cancel-in-progress": True,
+    }
+    return (
+        workflow.name == "public-fork-pr.yml"
+        and job_name == "validate"
+        and set(document) == {"name", True, "permissions", "concurrency", "jobs"}
+        and document.get("name") == "ROMarrNG fork PR validation"
+        and workflow_events == {"pull_request": pull_request}
+        and document.get("permissions") == {"contents": "read"}
+        and document.get("concurrency") == expected_concurrency
+        and set(job) == {"name", "if", "permissions", "uses"}
+        and job.get("name") == "Run disposable fork validation"
+        and job.get("if") == PUBLIC_FORK_CALLER_CONDITION
+        and job.get("permissions") == {"contents": "read"}
+        and job.get("uses") == PUBLIC_FORK_CALLER_USES
+    )
+
+
 def _runner_policy_violations(workflow_dir: Path) -> list[str]:
     workflow_files = sorted(
         path
@@ -50,6 +101,9 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
                 )
                 continue
             if "uses" in job and "runs-on" not in job:
+                if _is_approved_public_fork_caller(workflow, job_name, job, document):
+                    runner_count += 1
+                    continue
                 violations.append(
                     f"{workflow.name}/{job_name}: reusable workflow runner is not "
                     "visible in this file"
@@ -59,6 +113,12 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
             runner = job.get("runs-on")
             runner_count += 1
             location = f"{workflow.name}/{job_name}"
+            if (
+                workflow.name == "fork-safe-validation.yml"
+                and job_name == "validate"
+                and runner == PUBLIC_FORK_VALIDATION_RUNNER
+            ):
+                continue
             if (
                 workflow.name == "docker.yml"
                 and job_name == "test"
@@ -88,7 +148,7 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
 
             violations.append(
                 f"{location}: unsupported runner assignment {runner!r}; "
-                "public workflows must use hosted runners except for the exact trusted-main job"
+                "public workflows must use hosted runners except for the exact trusted-main or external-fork JIT job"
             )
 
     if runner_count == 0:
@@ -110,12 +170,46 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
             },
         )
 
-    def test_public_workflows_use_hosted_runners_except_trusted_main_job(self) -> None:
+    def test_public_workflows_use_hosted_runners_except_exact_runner_groups(self) -> None:
         self.assertEqual(
             _runner_policy_violations(WORKFLOW_DIR),
             [],
-            "only docker.yml/test on trusted main may select the organization pool",
+            "only the exact trusted-main and external-fork validator jobs may select runner groups",
         )
+
+    def test_fork_jit_runner_is_rejected_outside_the_approved_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workflow_dir = Path(temporary_directory)
+            (workflow_dir / "unrelated.yml").write_text(
+                yaml.safe_dump(
+                    {"jobs": {"validate": {"runs-on": PUBLIC_FORK_VALIDATION_RUNNER}}},
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            violations = _runner_policy_violations(workflow_dir)
+
+        self.assertEqual(len(violations), 1)
+        self.assertIn("unsupported runner assignment", violations[0])
+
+    def test_fork_jit_runner_requires_the_exact_approval_condition(self) -> None:
+        unsafe_runner = PUBLIC_FORK_VALIDATION_RUNNER.replace(
+            "github.event.pull_request.base.ref == 'main'",
+            "github.event.pull_request.base.ref != 'main'",
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workflow_dir = Path(temporary_directory)
+            (workflow_dir / "fork-safe-validation.yml").write_text(
+                yaml.safe_dump(
+                    {"jobs": {"validate": {"runs-on": unsafe_runner}}},
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            violations = _runner_policy_violations(workflow_dir)
+
+        self.assertEqual(len(violations), 1)
+        self.assertIn("unsupported runner assignment", violations[0])
 
     def test_quoted_runner_key_in_yaml_file_is_checked(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

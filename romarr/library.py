@@ -440,7 +440,7 @@ def import_rom(download: Path, platform: Platform, library_root: Path, *,
     if not chosen_sets:
         return [ImportResult(
             False, None,
-            f"no {platform.name} ROM among {len(candidates)} file(s)")]
+            f"no {platform.name} ROM found; candidate count: {len(candidates)}.")]
 
     results: list[ImportResult] = []
     for chosen in chosen_sets:
