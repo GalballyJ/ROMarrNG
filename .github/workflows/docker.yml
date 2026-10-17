@@ -313,6 +313,7 @@ jobs:
             org.opencontainers.image.description=ROMarrNG adds a SeerrNG request and library contract to ROMarr
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=main,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -424,6 +425,7 @@ jobs:
             org.opencontainers.image.description=ROMarrNG on Debian with the Playwright client for the Headless Browser download client
           tags: |
             type=raw,value=browser,enable={{is_default_branch}}
+            type=raw,value=main-browser,enable={{is_default_branch}}
             type=semver,pattern={{version}}-browser
             type=semver,pattern={{major}}.{{minor}}-browser
             type=sha,format=short,suffix=-browser
