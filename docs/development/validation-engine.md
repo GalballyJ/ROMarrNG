@@ -55,6 +55,10 @@ deselected. The engine counts passed, skipped, failed, and deselected cases
 from every shard, records the file inventory in one receipt, and does not call
 an empty run successful.
 
+The workflow sets `TMPDIR` to `RUNNER_TEMP` for the validation process so its
+receipt-verified evidence directory stays beneath the same private root used
+for artifact staging.
+
 Pull-request image jobs smoke-test the Alpine image and build the browser
 image for its supported platforms, all with read-only repository permissions.
 Separate publishing jobs receive registry
