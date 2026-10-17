@@ -29,6 +29,48 @@ PUBLIC_FORK_VALIDATION_RUNNER = (
     "&& fromJSON('[\"self-hosted\", \"linux\", \"x64\", \"public-pr-romarrng\"]') "
     "|| 'ubuntu-latest' }}"
 )
+PUBLIC_FORK_CALLER_CONDITION = (
+    "github.event.pull_request.head.repo.fork == true && "
+    "github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name && "
+    "github.event.pull_request.base.repo.full_name == 'snapetech-org/ROMarrNG' && "
+    "github.event.pull_request.base.ref == 'main'"
+)
+PUBLIC_FORK_CALLER_USES = (
+    "snapetech-org/ROMarrNG/.github/workflows/fork-safe-validation.yml"
+    "@5e8027f52c89f8089d13b97c5cd54a10998134ad"
+)
+
+
+def _is_approved_public_fork_caller(
+    workflow: Path, job_name: str, job: dict, document: dict
+) -> bool:
+    workflow_events = document.get("on")
+    if workflow_events is None:
+        workflow_events = document.get(True)
+    pull_request = {
+        "branches": ["main"],
+        "types": ["opened", "synchronize", "reopened", "ready_for_review"],
+    }
+    expected_concurrency = {
+        "group": "public-fork-pr-" + "$" + "{{ github.event.pull_request.number }}",
+        "cancel-in-progress": True,
+    }
+    return (
+        workflow.name == "public-fork-pr.yml"
+        and job_name == "validate"
+        and set(document) == {"name", True, "permissions", "concurrency", "jobs"}
+        and document.get("name") == "ROMarrNG fork PR validation"
+        and workflow_events == {"pull_request": pull_request}
+        and document.get("permissions") == {"contents": "read"}
+        and document.get("concurrency") == expected_concurrency
+        and set(job) == {"name", "if", "permissions", "uses"}
+        and job.get("name") == "Run disposable fork validation"
+        and job.get("if") == PUBLIC_FORK_CALLER_CONDITION
+        and job.get("permissions") == {"contents": "read"}
+        and job.get("uses") == PUBLIC_FORK_CALLER_USES
+    )
+
+
 def _runner_policy_violations(workflow_dir: Path) -> list[str]:
     workflow_files = sorted(
         path
@@ -59,6 +101,9 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
                 )
                 continue
             if "uses" in job and "runs-on" not in job:
+                if _is_approved_public_fork_caller(workflow, job_name, job, document):
+                    runner_count += 1
+                    continue
                 violations.append(
                     f"{workflow.name}/{job_name}: reusable workflow runner is not "
                     "visible in this file"
