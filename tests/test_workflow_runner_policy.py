@@ -26,9 +26,10 @@ PUBLIC_FORK_VALIDATION_RUNNER = (
     "&& github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name "
     "&& github.event.pull_request.base.repo.full_name == 'snapetech-org/ROMarrNG' "
     "&& github.event.pull_request.base.ref == 'main' "
-    "&& fromJSON('[\"self-hosted\", \"linux\", \"x64\", \"public-pr-romarrng\"]') "
+    "&& fromJSON('{\"group\":\"public-fork-jit\",\"labels\":[\"self-hosted\",\"linux\",\"x64\",\"public-pr-romarrng\"]}') "
     "|| 'ubuntu-latest' }}"
 )
+GVISOR_SANDBOX_RUNNER = {"group": "gvisor-sandbox", "labels": "gvisor-sandbox"}
 PUBLIC_FORK_CALLER_CONDITION = (
     "github.event.pull_request.head.repo.fork == true && "
     "github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name && "
@@ -68,6 +69,25 @@ def _is_approved_public_fork_caller(
         and job.get("if") == PUBLIC_FORK_CALLER_CONDITION
         and job.get("permissions") == {"contents": "read"}
         and job.get("uses") == PUBLIC_FORK_CALLER_USES
+    )
+
+
+def _is_approved_gvisor_sandbox_job(
+    workflow: Path, job_name: str, job: dict, document: dict
+) -> bool:
+    workflow_events = document.get("on")
+    if workflow_events is None and True in document:
+        workflow_events = document[True]
+    return (
+        workflow.name == "gvisor-runner-smoke.yml"
+        and job_name == "smoke"
+        and document.get("name") == "gVisor runner smoke"
+        and workflow_events == {"workflow_dispatch": None}
+        and document.get("permissions") == {}
+        and set(job) == {"if", "timeout-minutes", "runs-on", "steps"}
+        and job.get("if") == "github.ref == 'refs/heads/main'"
+        and job.get("timeout-minutes") == 5
+        and job.get("runs-on") == GVISOR_SANDBOX_RUNNER
     )
 
 
@@ -113,6 +133,8 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
             runner = job.get("runs-on")
             runner_count += 1
             location = f"{workflow.name}/{job_name}"
+            if _is_approved_gvisor_sandbox_job(workflow, job_name, job, document):
+                continue
             if (
                 workflow.name == "fork-safe-validation.yml"
                 and job_name == "validate"
@@ -174,7 +196,7 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
         self.assertEqual(
             _runner_policy_violations(WORKFLOW_DIR),
             [],
-            "only the exact trusted-main and external-fork validator jobs may select runner groups",
+            "only the exact trusted-main, external-fork JIT, or main-only gVisor smoke job may select runner groups",
         )
 
     def test_fork_jit_runner_is_rejected_outside_the_approved_workflow(self) -> None:

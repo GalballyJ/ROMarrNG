@@ -2955,9 +2955,20 @@ async function editItem(kind, item){
 
   const m = document.createElement('div');
   m.className = 'modal';
+  const clientPathContext = kind === 'downloadclient'
+    ? `<div class="panel-note"><b>Container path check</b><br>
+      ROMarr library destination: <code>${esc(SETTINGS.library_path||'not configured')}</code>.<br>
+      ${item.save_path
+        ? `Configured client save path: <code>${esc(item.save_path)}</code>.`
+        : 'This client reports the completed path for each download.'}
+      ROMarr checks the actual completed path during import. If that path is not
+      visible inside ROMarr, use the remote path mapping on Media Management;
+      keep the download path and library destination distinct.</div>`
+    : '';
   m.innerHTML = `<div class="box">
     <h3>${isNew ? 'Add' : 'Edit'} ${esc(spec.label)}</h3>
     <div class="sub">${esc(spec.protocol || (KINDS[kind]||{}).label || '')}${spec.managed ? ' · manages its own indexers' : ''}</div>
+    ${clientPathContext}
     <div id="fields">${spec.fields.map(f => fieldHtml(f, item[f.name])).join('')}</div>
     <div id="testline"></div>
     <div class="foot">
@@ -3062,7 +3073,7 @@ const pathMappingRow=m=>{
 };
 const pathMappingRows=m=>(Array.isArray(m)&&m.length?m:[{}]).map(pathMappingRow).join('');
 RENDER.media=()=>settingsPage('Media Management',
-  'Where imported ROMs are filed. This must be the same path your library server scans.',
+  'Where imported ROMs are filed. This container path must be the same path your library server scans. Completed-download paths are reported by the client per item; compare that exact path before import and add a remote path mapping below when ROMarr sees it somewhere else.',
   fld('library_path','ROM library root',SETTINGS.library_path)
   +fld('dat_path','DAT directory',SETTINGS.dat_path||'')
   +`<div class="field"><label>Remote path mappings</label>
@@ -3163,9 +3174,11 @@ RENDER.clients=async()=>{
         <td>${state(c)}</td>
         <td><div class="rowact"><button data-edit="${i}">Edit</button></div></td>
         </tr>`).join('')}</tbody></table>`
-    :'<div class="empty">No download clients are configured yet. Add one to start downloading.</div>'}
+    :`<div class="empty">${interfaceMarkup('ROMarr cannot send release grabs without an enabled compatible download client. ROM browsing and local-library features still work.')}<br><button class="btn" id="c-add-empty" data-i18n="Add">Add</button></div>`}
   </div>`;
   $('#c-add').onclick=()=>addItem('downloadclient');
+  const emptyAdd=$('#c-add-empty');
+  if(emptyAdd)emptyAdd.onclick=()=>addItem('downloadclient');
   document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=async()=>{
     const row=d.items[Number(b.dataset.edit)];
     // The table is a status view; the editor needs the stored configuration.
@@ -3230,6 +3243,8 @@ RENDER.libraries=async()=>{
 
 RENDER.indexers=async()=>{
   const d=await j('/api/v1/indexer');
+  const hasEnabledSource=(d.items||[]).some(i=>i.enable)
+    ||(d.proxied||[]).some(i=>i.enable);
   $('#page').innerHTML=`<div class="card">
     <div class="row" style="margin-bottom:12px">
       <h3 style="margin:0">Indexers</h3>
@@ -3237,6 +3252,7 @@ RENDER.indexers=async()=>{
     </div>
     <p class="help">Add a Newznab or Torznab indexer directly, or point at
       Prowlarr and use everything it already has configured.</p>
+    ${d.items.length&&!hasEnabledSource?`<p class="panel-note panel-warn">${interfaceMarkup('Release search is unavailable until an enabled indexer is configured. ROM browsing and local-library features still work.')}</p>`:''}
     ${d.items.length?`<table><thead><tr><th>Name</th><th>Type</th><th>URL</th>
       <th>Enabled</th><th></th></tr></thead><tbody>
       ${d.items.map((it,i)=>`<tr><td>${esc(it.name||'—')}</td>
@@ -3245,7 +3261,9 @@ RENDER.indexers=async()=>{
         <td><span class="dot ${it.enable?'up':'down'}"></span>${it.enable?'yes':'no'}</td>
         <td><div class="rowact"><button data-iedit="${i}">Edit</button></div></td>
         </tr>`).join('')}</tbody></table>`
-    :'<div class="empty">No indexers configured.</div>'}
+    :`<div class="empty">${interfaceMarkup(hasEnabledSource
+      ?'No direct indexers are configured. Enabled Prowlarr indexers are listed below.'
+      :'Release search is unavailable until an enabled indexer is configured. ROM browsing and local-library features still work.')}<br><button class="btn" id="i-add-empty" data-i18n="Add">Add</button></div>`}
   </div>
   ${(d.proxied||[]).length?`<div class="card"><h3>Via Prowlarr</h3>
     <p class="help">Managed in Prowlarr, shown here read-only. Add or remove
@@ -3264,6 +3282,8 @@ RENDER.indexers=async()=>{
           <button class="btn ghost" id="i-diagnose">Test indexers</button></div>
         </div><div id="i-diagnostics"></div>`:'')}`;
   $('#i-add').onclick=()=>addItem('indexer');
+  const emptyAdd=$('#i-add-empty');
+  if(emptyAdd)emptyAdd.onclick=()=>addItem('indexer');
   const test=$('#i-diagnose');
   if(test)test.onclick=async()=>{
     test.disabled=true;test.textContent='Testing…';
@@ -3298,8 +3318,10 @@ RENDER.indexers=async()=>{
 };
 
 RENDER.general=()=>settingsPage('General',
-  'Connections to the rest of the stack. Credentials live in the environment '
-  +'file, not here — this page never shows or stores a secret.',
+  'Optional connections to the rest of the stack. Credentials live in the environment '
+  +'file, not here — this page never shows or stores a secret. Indexers and download '
+  +'clients have their own Settings pages; notifications and metadata connections '
+  +'can be added only when you choose to use them.',
   `<div class="field"><label>Prowlarr</label>
      <input type="text" value="${esc(SETTINGS._prowlarr_url||'')}" disabled></div>
    <div class="field"><label>qBittorrent</label>
@@ -4129,6 +4151,15 @@ RENDER.getstarted=async()=>{
        +' <a href="#collections">'+interfaceMarkup('Collections')+'</a> '
        +interfaceMarkup('can tell you what a complete set is missing.'))
     +'</div>'
+
+    +'<div class="card" style="margin-top:16px"><h3>Optional follow-ups</h3>'
+    +'<p class="help">'+interfaceMarkup('Core search, grabbing, and filing do not require these optional features.')+'</p>'
+    +'<ul class="help">'
+    +'<li>'+interfaceMarkup('DAT checks and complete-set progress are optional.')+' <a href="#collections">'+interfaceMarkup('Collections')+'</a></li>'
+    +'<li>'+interfaceMarkup('Import lists are optional and can add games to Wanted automatically.')+' <a href="#lists">'+interfaceMarkup('Lists')+'</a></li>'
+    +'<li>'+interfaceMarkup('Plugins are optional acquisition sources; install only plugins you trust.')+' <a href="#hub">'+interfaceMarkup('Plugins')+'</a></li>'
+    +'<li>'+interfaceMarkup('Streaming hosts and browser players are optional; they do not block filing ROMs.')+' <a href="#platforms">'+interfaceMarkup('Platforms')+'</a> · <a href="#status">'+interfaceMarkup('System')+'</a></li>'
+    +'</ul></div>'
 
     +'<div class="card" style="margin-top:16px"><h3>Where you actually play</h3>'
     +'<p class="help">'+interfaceMarkup('ROMarr files the ROM; one of these runs it. You do not need all of them — one is enough.')+'</p>'

@@ -71,6 +71,7 @@ full claim-by-claim evidence file.*
 - [Requirements](#requirements)
 - [Installation](#installation) — [Docker](#docker) · [Docker Compose](#docker-compose) · [Proxmox LXC](#proxmox-lxc) · [Home Assistant](#home-assistant) · [Source](#from-source)
   - **[The full install guide](docs/INSTALL.md)** — every variable, backup, upgrade, rollback, troubleshooting
+- [Setup experience contract](docs/design/setup-experience-contract.md) — apply guided setup through ROMarrNG's existing claim, settings, and status surfaces
 - [Signing in](#signing-in)
 - [Configuration](#configuration)
 - [Usage](#usage)

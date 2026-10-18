@@ -41,6 +41,29 @@ sits between three things you already run:
 Everything else — DAT verification, import lists, streaming hosts, the browser
 players, plugins — is optional and off until configured.
 
+Start with the capability you want: an enabled indexer is needed to search
+releases, a compatible download client is needed to grab them, and a plain
+folder is enough to file ROMs. Browsing local libraries remains available when
+search or acquisition is not configured. The existing **System → Get Started**
+page links to those settings and offers optional follow-ups for DAT checks
+(**Collections**), import lists (**Wanted → Lists**), plugins (**ROM Hub →
+Plugins**), and player/streaming status (**System → Platforms / Status**). Their
+configuration is covered under [optional integrations](#optional-integrations).
+
+Keep those add-ons for later, if they fit your setup:
+
+- **DAT verification and full-set tracking:** optional confidence and
+  collection tools under **System → Collections**; see the
+  [DAT configuration](#configuration-reference) and
+  [SeerrNG preservation catalog](SEERRNG-INTEGRATION.md).
+- **Import lists:** optional scheduled sources for Wanted, at
+  **Wanted → Lists**.
+- **Plugins:** optional ROM acquisition sources under **ROM Hub → Plugins**;
+  review the code and only install plugins you trust.
+- **Streaming hosts and browser players:** optional playback integrations
+  surfaced under **System → Platforms / Status** and described in the
+  [optional integration settings](#optional-integrations).
+
 **ROMarr starts and serves its UI with none of the three reachable.** The
 Settings pages name what is missing. A first run is never a blank failure, so
 it is fine to start it before the rest of the stack is ready.
