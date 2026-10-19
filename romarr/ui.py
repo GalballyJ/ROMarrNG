@@ -3103,6 +3103,13 @@ RENDER.media=()=>settingsPage('Media Management',
      +'below. The Digimon-only-in-Japan case: "Fill" downloads the translation '
      +'instead of leaving the game Japanese-only; "Keep both" files it under '
      +'Translations/ so your library shows it as a variant.')
+  +fld('patch_catalog_url','Patch catalogue URL (optional)',SETTINGS.patch_catalog_url||'')
+  +`<div style="color:var(--dim);font-size:11.5px;margin:-6px 0 12px">
+     An https address of a JSON catalogue of translation, ROM-hack and
+     improvement projects, refreshed every 12 hours. Projects in a
+     <code>patch-catalog.d</code> folder next to your data file are always
+     read. Nothing is bundled, and completeness is only what a project states.
+     See <code>docs/patch-catalogue.md</code>.</div>`
   +`<div class="field"><label>Fan-translation languages</label>
      <input type="text" data-k="translation_langs" data-list="1"
        value="${esc((SETTINGS.translation_langs||['en']).join(', '))}">
