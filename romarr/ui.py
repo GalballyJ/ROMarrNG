@@ -3077,13 +3077,13 @@ function settingsPage(title, help, body, after){
     toastLabel('Saved');
   };
 }
-const fld=(k,label,val,type='text',extra='')=>`<div class="field"><label>${label}</label>
-  <input type="${type}" data-k="${k}" ${extra} value="${esc(val)}"></div>`;
+const fld=(k,label,val,type='text',extra='')=>`<div class="field"><label for="s-${k}">${label}</label>
+  <input type="${type}" id="s-${k}" data-k="${k}" ${extra} value="${esc(val)}"></div>`;
 const chk=(k,label,val)=>`<label class="check"><input type="checkbox" data-k="${k}"
   ${val?'checked':''}><span>${label}</span></label>`;
 
-const sel=(k,label,options,val,help='')=>`<div class="field"><label>${label}</label>
-  <select data-k="${k}">${options.map(([v,t])=>{
+const sel=(k,label,options,val,help='')=>`<div class="field"><label for="s-${k}">${label}</label>
+  <select id="s-${k}" data-k="${k}">${options.map(([v,t])=>{
     const source=String(t??''),marker=Object.hasOwn(UI_LABELS,source)?` data-i18n="${esc(source)}"`:'';
     return `<option value="${esc(v)}"${String(val)===v?' selected':''}${marker}>${esc(translateLabel(source,readInterfaceLanguage()))}</option>`;
   }).join('')}</select>
@@ -3150,8 +3150,8 @@ RENDER.media=()=>settingsPage('Media Management',
      <code>patch-catalog.d</code> folder next to your data file are always
      read. Nothing is bundled, and completeness is only what a project states.
      See <code>docs/patch-catalogue.md</code>.</div>`
-  +`<div class="field"><label>Fan-translation languages</label>
-     <input type="text" data-k="translation_langs" data-list="1"
+  +`<div class="field"><label for="s-translation_langs">Fan-translation languages</label>
+     <input type="text" id="s-translation_langs" data-k="translation_langs" data-list="1"
        value="${esc((SETTINGS.translation_langs||['en']).join(', '))}">
      <div style="color:var(--dim);font-size:11.5px;margin-top:4px">
        Comma-separated codes, e.g. <code>de, en</code>. Matches scene markers
