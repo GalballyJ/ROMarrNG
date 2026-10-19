@@ -309,6 +309,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Require Docker Hub publisher credentials
+        id: dockerhub-credentials
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+            echo '- Docker Hub standard image mirror: credentials configured.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Docker Hub publisher credentials are required for stable releases.' >&2
+            exit 1
+          fi
+
+      - name: Log in to Docker Hub
+        id: login-dockerhub
+        if: steps.dockerhub-credentials.outputs.configured == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Resolve this fork's image name
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
@@ -322,8 +348,8 @@ jobs:
             org.opencontainers.image.title=ROMarrNG
             org.opencontainers.image.description=ROMarrNG adds a SeerrNG request and library contract to ROMarr
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=main,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=main,enable=${{ github.ref_type == 'tag' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -365,6 +391,25 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           sbom-path: ${{ runner.temp }}/romarrng-image.spdx.json
           push-to-registry: true
+
+      - name: Mirror stable standard image tags to Docker Hub
+        id: dockerhub-mirror
+        if: steps.dockerhub-credentials.outputs.configured == 'true' && steps.login-dockerhub.outcome == 'success'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DOCKERHUB_IMAGE: docker.io/snapetech/romarrng
+          BUILD_DIGEST: ${{ steps.push.outputs.digest }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          IFS='.' read -r major minor _ <<< "$version"
+          for tag in "$version" "$major.$minor" "$major" main latest; do
+            docker buildx imagetools create \
+              --tag "${DOCKERHUB_IMAGE}:${tag}" \
+              "${IMAGE}@${BUILD_DIGEST}"
+          done
 
   # Debian variant for the optional Playwright download client. Keep it on
   # separate tags so the default Alpine image and `latest` remain unchanged.
@@ -421,6 +466,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Require Docker Hub publisher credentials
+        id: dockerhub-credentials
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+            echo '- Docker Hub browser image mirror: credentials configured.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Docker Hub publisher credentials are required for stable releases.' >&2
+            exit 1
+          fi
+
+      - name: Log in to Docker Hub
+        id: login-dockerhub
+        if: steps.dockerhub-credentials.outputs.configured == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Resolve this fork's image name
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
@@ -434,8 +505,9 @@ jobs:
             org.opencontainers.image.title=ROMarrNG (browser edition)
             org.opencontainers.image.description=ROMarrNG on Debian with the Playwright client for the Headless Browser download client
           tags: |
-            type=raw,value=browser,enable={{is_default_branch}}
-            type=raw,value=main-browser,enable={{is_default_branch}}
+            type=raw,value=browser,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=main-browser,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest-browser,enable=${{ github.ref_type == 'tag' }}
             type=semver,pattern={{version}}-browser
             type=semver,pattern={{major}}.{{minor}}-browser
             type=sha,format=short,suffix=-browser
@@ -477,6 +549,25 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           sbom-path: ${{ runner.temp }}/romarrng-browser-image.spdx.json
           push-to-registry: true
+
+      - name: Mirror stable browser image tags to Docker Hub
+        id: dockerhub-mirror
+        if: steps.dockerhub-credentials.outputs.configured == 'true' && steps.login-dockerhub.outcome == 'success'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DOCKERHUB_IMAGE: docker.io/snapetech/romarrng
+          BUILD_DIGEST: ${{ steps.push.outputs.digest }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          IFS='.' read -r major minor _ <<< "$version"
+          for tag in "${version}-browser" "${major}.${minor}-browser" browser main-browser latest-browser; do
+            docker buildx imagetools create \
+              --tag "${DOCKERHUB_IMAGE}:${tag}" \
+              "${IMAGE}@${BUILD_DIGEST}"
+          done
 
   release:
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.image_publish.result == 'success' && needs.image_browser_publish.result == 'success'

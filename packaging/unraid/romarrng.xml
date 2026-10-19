@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>ROMarrNG</Name>
-  <Repository>ghcr.io/snapetech-org/romarrng:main</Repository>
+  <Repository>ghcr.io/snapetech-org/romarrng:latest</Repository>
   <Registry>https://ghcr.io/snapetech-org/romarrng</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
