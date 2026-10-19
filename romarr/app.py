@@ -69,6 +69,8 @@ from .indexers import Prowlarr, ProwlarrConfig
 from .library import import_rom, map_remote_path, platform_dir
 from .game_assets import bundle_range, directory_asset, stream_directory
 from .collections import is_translation
+from .library import TRANSLATION_SUBDIR
+from .patches import PatchCatalog, PatchError, prepare_patched_file, public_project
 from .auth import DISABLED as AUTH_DISABLED
 from .auth import MIN_PASSWORD, SESSION_COOKIE, Auth, new_api_key, parse_cookies
 from .capture import MAX_BODY_BYTES as CAPTURE_MAX_BODY
@@ -401,6 +403,24 @@ def _seerr_local_assets(service, request: SeerrRequest) -> list[dict]:
     except OSError:
         return []
 
+    patch = _patch_selection(request)
+    if patch is not None:
+        # Only the prepared file is deliverable; the base dump is not.
+        output = Path(str(patch.get("output") or "")) if patch.get("state") == "prepared" else None
+        if output is None:
+            return []
+        try:
+            real = output.resolve(strict=True)
+            real.relative_to(root)
+            size = real.stat().st_size
+        except (OSError, ValueError):
+            return []
+        if not real.is_file():
+            return []
+        return [{"id": hashlib.sha256(str(real).encode("utf-8")).hexdigest(),
+                 "name": real.name, "size": size, "path": real,
+                 "datVerified": None}]
+
     assets: list[dict] = []
     related = [item for item in service.queue
                if item.external_request_id == request.external_request_id]
@@ -454,7 +474,7 @@ def _seerr_local_assets(service, request: SeerrRequest) -> list[dict]:
     return assets
 
 
-def _seerr_request_view(service, request: SeerrRequest) -> dict:
+def _seerr_request_view_base(service, request: SeerrRequest) -> dict:
     queue_rows = [
         item for item in service.queue
         if item.external_request_id == request.external_request_id
@@ -568,6 +588,201 @@ def _seerr_request_view(service, request: SeerrRequest) -> dict:
     }
 
 
+
+# --- translation, hack and improvement patch requests ------------------------
+
+def _patch_selection(request: SeerrRequest) -> dict | None:
+    selection = getattr(request, "selection", None)
+    return selection if isinstance(selection, dict) and selection.get("kind") == "patch" else None
+
+
+def _patch_version(project: dict, version_id: str) -> dict | None:
+    wanted = version_id or project.get("latestVersionId") or ""
+    return next((v for v in project["versions"] if v["id"] == wanted), None)
+
+
+def _parse_patch_selection(service, raw, platform_slug: str):
+    """Validate a SeerrNG patch selection against the catalogue.
+
+    Returns (selection, None) or (None, error message). The stored selection
+    pins the resolved version so a later catalogue update cannot silently
+    change what an existing request prepares.
+    """
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict) or raw.get("kind") != "patch":
+        return None, "unsupported selection"
+    project_id = str(raw.get("projectId") or "")
+    project = service.patches.get(project_id)
+    if project is None:
+        return None, "unknown patch project"
+    slug = project["game"]["platformSlug"]
+    if slug and slug != platform_slug:
+        return None, "patch project is for a different system"
+    version = _patch_version(project, str(raw.get("versionId") or ""))
+    if version is None:
+        return None, "unknown patch version"
+    return {
+        "kind": "patch",
+        "projectId": project["id"],
+        "versionId": version["id"],
+        "keepOriginal": raw.get("keepOriginal") is not False,
+        "state": "pending",
+    }, None
+
+
+def _patch_base_rows(service, request: SeerrRequest) -> list[dict]:
+    return _seerr_library_matches(
+        service, SeerrRequest(request.external_request_id, request.game, request.platform))
+
+
+def _patch_base_available(service, project: dict, version: dict) -> bool:
+    probe = SeerrRequest("probe", project["game"]["title"],
+                         project["game"]["platformSlug"] or "")
+    if not probe.platform:
+        return True
+    return bool(_seerr_library_matches(service, probe))
+
+
+def _patch_output_dir(service, base: Path, project: dict) -> Path:
+    # Beside the base dump, in the subfolder library servers already treat as
+    # a variant of the game.
+    return base.parent / (TRANSLATION_SUBDIR if project["kind"] == "translation" else "Hacks")
+
+
+def _run_patch_prepare(service, external_id: str) -> None:
+    def update(**changes) -> None:
+        row = service.store.get_seerr_request(external_id)
+        if row is None:
+            return
+        selection = dict(row.selection or {})
+        selection.update(changes)
+        row.selection = selection
+        if changes.get("output"):
+            row.assets = [changes["output"]]
+        service.store.put_seerr_request(row)
+
+    request = service.store.get_seerr_request(external_id)
+    selection = _patch_selection(request) if request else None
+    if request is None or selection is None:
+        return
+    project = service.patches.get(selection["projectId"])
+    version = _patch_version(project, selection["versionId"]) if project else None
+    if project is None or version is None:
+        return update(state="failed", errorCode="PATCH_UNKNOWN",
+                      error="The patch project is no longer in the catalogue.")
+    target = service.library_for(request.platform) or service.default_library()
+    if target is None:
+        return update(state="failed", errorCode="BASE_MISSING",
+                      error="No library is configured for this system.")
+    root = service.library_root(target[0])
+    last: PatchError | None = None
+    try:
+        from .patches import fetch_patch
+        patch = fetch_patch(version)
+        for row in _patch_base_rows(service, request):
+            base = Path(str(row.get("id") or ""))
+            if not base.is_absolute():
+                continue
+            try:
+                prepared = prepare_patched_file(
+                    base, root, project, version,
+                    _patch_output_dir(service, base, project), patch)
+            except PatchError as err:
+                last = err
+                if err.code in ("BASE_MISMATCH", "BASE_UNSUPPORTED"):
+                    continue
+                raise
+            update(state="prepared", output=str(prepared.path),
+                   patchFormat=prepared.patch_format, verified=prepared.verified,
+                   errorCode="", error="")
+            service._refresh_now.set()
+            return
+        raise last or PatchError("The base game is not in the library yet.", "BASE_MISSING")
+    except PatchError as err:
+        update(state="failed", errorCode=err.code, error=str(err))
+    except Exception as err:  # noqa: BLE001 - reflected as a safe status
+        log.error("patch preparation failed (%s)", err.__class__.__name__)
+        update(state="failed", errorCode="PATCH_FAILED",
+               error="The patch could not be prepared.")
+
+
+def _reset_patch_state(service, request: SeerrRequest) -> None:
+    """A retry starts the preparation over, whatever failed before."""
+    with service._seerr_request_lock:
+        row = service.store.get_seerr_request(request.external_request_id)
+        selection = _patch_selection(row) if row else None
+        if row is not None and selection is not None:
+            row.selection = dict(selection, state="pending", errorCode="", error="")
+            service.store.put_seerr_request(row)
+
+
+def _kick_patch_prepare(service, request: SeerrRequest) -> None:
+    """Start preparation once; the stored state is the lock."""
+    with service._seerr_request_lock:
+        row = service.store.get_seerr_request(request.external_request_id)
+        selection = _patch_selection(row) if row else None
+        if row is None or selection is None or selection.get("state") != "pending":
+            return
+        selection = dict(selection, state="preparing")
+        row.selection = selection
+        service.store.put_seerr_request(row)
+    threading.Thread(target=_run_patch_prepare,
+                     args=(request.external_request_id,),
+                     name="romarr-patch-prepare", daemon=True).start()
+
+
+def _patch_request_view(service, request: SeerrRequest, view: dict) -> dict:
+    """Overlay a patch request's own progress on the base-game view.
+
+    The base game being in the library never makes the request available: the
+    patched file is what was asked for.
+    """
+    selection = _patch_selection(request)
+    if selection is None:
+        return view
+    state = selection.get("state")
+    base_ready = view["status"] == "available"
+    if state == "pending" and base_ready and view["status"] != "cancelled":
+        _kick_patch_prepare(service, request)
+        state = "preparing"
+    if view["status"] == "cancelled":
+        return view
+    view = dict(view)
+    view["selection"] = {k: selection.get(k) for k in
+                         ("kind", "projectId", "versionId", "keepOriginal", "state",
+                          "patchFormat", "verified") if selection.get(k) is not None}
+    if state == "prepared":
+        assets = _seerr_local_assets(service, request)
+        view.update(status="available", stage="available", error=None,
+                    failureCode=None, failureMessage=None,
+                    deliverable=bool(assets))
+        view["game"] = dict(view["game"], status="available")
+        view["actions"] = {"retry": False, "cancel": False}
+    elif state == "failed":
+        view.update(status="failed", stage="failed",
+                    failureCode=selection.get("errorCode") or "PATCH_FAILED",
+                    failureMessage=selection.get("error") or "The patch could not be prepared.",
+                    error=selection.get("error") or "The patch could not be prepared.",
+                    deliverable=False)
+        view["game"] = dict(view["game"], status="failed")
+        view["actions"] = {"retry": True, "cancel": False}
+    elif state == "preparing":
+        view.update(status="importing", stage="importing", deliverable=False,
+                    error=None, failureCode=None, failureMessage=None)
+        view["game"] = dict(view["game"], status="importing")
+        view["actions"] = {"retry": False, "cancel": False,
+                           "cancelReason": "ROMarrNG is preparing the patched file."}
+    elif view["status"] == "available":
+        view["status"], view["stage"] = "searching", "searching"
+    return view
+
+
+def _seerr_request_view(service, request: SeerrRequest) -> dict:
+    view = _seerr_request_view_base(service, request)
+    return _patch_request_view(service, request, view)
+
+
 def _seerr_request_identity_matches(
     row: SeerrRequest, game: str, platform: str,
     catalog_provider: str, catalog_id: int, platform_id: int,
@@ -586,6 +801,15 @@ def _seerr_request_identity_matches(
 def _start_seerr_dispatch(service, request: SeerrRequest) -> None:
     """Run ROMarr's normal search without holding the SeerrNG HTTP request."""
     def dispatch() -> None:
+        if _patch_selection(request) is not None:
+            _reset_patch_state(service, request)
+        if _patch_selection(request) is not None and _patch_base_rows(service, request):
+            # The base game is already filed: no new download, just prepare.
+            service.store.update_seerr_request(
+                request.external_request_id, status="importing",
+                only_if_not_cancelled=True)
+            _kick_patch_prepare(service, request)
+            return
         try:
             result = service.request(
                 request.game,
@@ -814,6 +1038,11 @@ class ROMarr:
         # lost everything you had asked for, which is the difference between a
         # tool and a demo.
         self.store = Store(e.get("ROMARR_DATA", "/opt/romarr/romarr.json"))
+        # Translation, hack and improvement projects. Nothing is bundled:
+        # projects come from <data dir>/patch-catalog.d and an optional URL.
+        self.patches = PatchCatalog(
+            Path(e.get("ROMARR_DATA", "/opt/romarr/romarr.json")).parent,
+            lambda: str(self.store.settings.get("patch_catalog_url") or ""))
         # A durable "dispatching" marker means the process stopped somewhere
         # between reserving a request and recording the downloader handoff.
         # Reconcile it once at startup, when the old worker can no longer race.
@@ -5477,6 +5706,41 @@ def make_handler(service: ROMarr):
                                   "text/html; charset=utf-8")
 
             # --- *arr-shaped API ---------------------------------------
+            if route.path == "/api/v1/integration/patches/search":
+                def one(name: str, limit: int = 128) -> str:
+                    return ((query.get(name) or [""])[0])[:limit]
+                try:
+                    count = max(1, min(int(one("limit", 4) or 24), 48))
+                    offset = max(0, int(one("cursor", 8) or 0))
+                except ValueError:
+                    return self._json(400, {"error": "invalid paging"})
+                kind = one("kind", 16)
+                if kind and kind not in ("translation", "hack", "improvement"):
+                    return self._json(400, {"error": "invalid kind"})
+                projects, nxt = service.patches.search(
+                    q=one("q", 200), platform=one("platform", 64), kind=kind,
+                    language=one("language", 8),
+                    complete_only=one("completeOnly", 5) == "true",
+                    catalog_key=one("catalogKey"), limit=count, offset=offset)
+                memo: dict[tuple, bool] = {}
+
+                def available(project: dict, version: dict) -> bool:
+                    key = (project["game"]["title"], project["game"]["platformSlug"])
+                    if key not in memo:
+                        memo[key] = _patch_base_available(service, project, version)
+                    return memo[key]
+                return self._json(200, {
+                    "results": [public_project(p, available) for p in projects],
+                    "nextCursor": str(nxt) if nxt is not None else None,
+                })
+            patch_project_prefix = "/api/v1/integration/patches/projects/"
+            if route.path.startswith(patch_project_prefix):
+                project_id = unquote(route.path.rsplit("/", 1)[-1])
+                project = service.patches.get(project_id)
+                if project is None:
+                    return self._json(404, {"error": "patch project not found"})
+                return self._json(200, public_project(
+                    project, lambda p, v: _patch_base_available(service, p, v)))
             if route.path == "/api/v1/integration/ping":
                 catalog = igdb_catalog_config(
                     service.store.list_items("metadata_providers")) is not None
@@ -5493,6 +5757,7 @@ def make_handler(service: ROMarr):
                         "requestActions": {"retry": True, "cancel": True},
                         "assetStreaming": True,
                         "assetDatVerification": True,
+                        "patchCatalog": True,
                     },
                 })
             if route.path == "/api/v1/integration/info":
@@ -6394,6 +6659,10 @@ def make_handler(service: ROMarr):
                         or not game or len(game) > 500 or platform is None):
                     return self._json(400, {
                         "error": "externalRequestId, game and a valid platform are required"})
+                selection, selection_error = _parse_patch_selection(
+                    service, body.get("selection"), platform.slug if platform else "")
+                if selection_error:
+                    return self._json(400, {"error": selection_error})
                 if catalog_provider == "dat":
                     selected = dat_catalog_game(
                         service.dats.dats,
@@ -6414,6 +6683,12 @@ def make_handler(service: ROMarr):
                         ):
                             return self._json(409, {
                                 "error": "externalRequestId is already bound to a different game or platform identity"})
+                        if (_patch_selection(existing) or {}).get("projectId") != (
+                                selection or {}).get("projectId") or (
+                                _patch_selection(existing) or {}).get("versionId") != (
+                                selection or {}).get("versionId"):
+                            return self._json(409, {
+                                "error": "externalRequestId is already bound to a different patch selection"})
                         return self._json(200, _seerr_request_view(service, existing))
                     row = SeerrRequest(
                         external_request_id=external_id,
@@ -6423,7 +6698,9 @@ def make_handler(service: ROMarr):
                         catalog_id=catalog_id or 0,
                         catalog_key=catalog_key,
                         platform_id=platform_id or 0,
-                        status="available" if _seerr_library_matches(
+                        selection=selection or {},
+                        # A patch request is never satisfied by the base game.
+                        status="available" if not selection and _seerr_library_matches(
                             service,
                             SeerrRequest(external_id, game, platform.slug),
                         ) else "searching",

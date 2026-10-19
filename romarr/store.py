@@ -160,6 +160,10 @@ class SeerrRequest:
     # import queue before exposing or streaming them.
     created_at: str = field(default_factory=now_iso)
     assets: list[str] = field(default_factory=list)
+    # Content chosen beyond the base game. For a patch request:
+    # {"kind": "patch", "projectId", "versionId", "keepOriginal", "state":
+    # pending|preparing|prepared|failed, "output", "errorCode", "error"}.
+    selection: dict = field(default_factory=dict)
 
 
 # Defaults are spelled out here rather than scattered through the UI so a fresh
@@ -195,6 +199,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # exclude | fill | prefer | keep_both. See collections.TRANSLATION_POLICIES.
     # keep_both files the translation in the platform's Translations subfolder.
     "translation_policy": "exclude",
+    # Optional https URL of a JSON patch catalogue (see docs/patch-catalogue.md).
+    # Empty means only the local patch-catalog.d folder is read.
+    "patch_catalog_url": "",
     # Which fan-translation languages the policy accepts. "en" preserves the
     # historical English-only behaviour; operators select their own codes
     # under Settings -> Media Management.

@@ -14,7 +14,8 @@
         "cancel": true
       },
       "assetStreaming": true,
-      "assetDatVerification": true
+      "assetDatVerification": true,
+      "patchCatalog": true
     }
   },
   "identityExamples": {

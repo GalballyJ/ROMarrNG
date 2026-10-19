@@ -44,6 +44,8 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                             "origin and source."),
     "/api/v1/integration/ping": ("GET", "Authenticated version handshake for "
                                          "SeerrNG software requests."),
+    "/api/v1/integration/patches/search": ("GET", "Search translation, hack and improvement projects."),
+    "/api/v1/integration/patches/projects/{projectId}": ("GET", "Read one patch project with its versions."),
     "/api/v1/integration/info": ("GET", "ROMarrNG service identity and external-platform capabilities."),
     "/api/integration/seerrng/v1/ping": ("GET", "Canonical version and capability handshake for SeerrNG software requests."),
     "/api/integration/seerrng/v1/catalog/platforms": ("GET", "IGDB catalog platforms with stable numeric IDs."),
@@ -56,6 +58,8 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/integration/seerrng/v1/catalog/dat/search-page": ("GET", "Search the loaded DAT catalog by title with bounded cursor pagination."),
     "/api/integration/seerrng/v1/catalog/dat/browse-page": ("GET", "Browse loaded DAT titles alphabetically with bounded offset pagination."),
     "/api/integration/seerrng/v1/catalog/dat/games/{catalogKey}": ("GET", "Read one DAT title by its stable opaque catalog key."),
+    "/api/integration/seerrng/v1/patches/search": ("GET", "Search translation, hack and improvement projects loaded from the local patch catalogue and the optional catalogue URL."),
+    "/api/integration/seerrng/v1/patches/projects/{projectId}": ("GET", "Read one patch project with its versions, completeness, and whether each version's base game is in the library."),
     "/api/integration/seerrng/v1/library/lookup": ("POST", "Look up SeerrNG emulation requests against the local ROM library."),
     "/api/integration/seerrng/v1/requests": ("POST", "Idempotently create a SeerrNG emulation request with its IGDB or DAT catalog identity. Returns 503 with Retry-After when all four dispatch slots are busy."),
     "/api/integration/seerrng/v1/requests/{externalRequestId}": ("GET", "Read request status, stable catalog identity and available actions."),
@@ -410,6 +414,9 @@ def served_routes(source: str | None = None) -> set[str]:
             and 'route.path.startswith(seerr_prefix' in source):
         found.update(path for path in DESCRIPTIONS
                      if path.startswith("/api/integration/seerrng/v1/"))
+    if ('patch_project_prefix = "/api/v1/integration/patches/projects/"' in source
+            and 'route.path.startswith(patch_project_prefix)' in source):
+        found.add("/api/v1/integration/patches/projects/{projectId}")
     if ('catalog_game_prefix = "/api/v1/integration/catalog/games/"' in source
             and 'route.path.startswith(catalog_game_prefix)' in source):
         found.add("/api/v1/integration/catalog/games/{igdbId}")
