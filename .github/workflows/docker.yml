@@ -350,6 +350,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
             type=raw,value=main,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=master,enable=${{ github.ref_type == 'tag' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -405,7 +406,7 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           IFS='.' read -r major minor _ <<< "$version"
-          for tag in "$version" "$major.$minor" "$major" main latest; do
+          for tag in "$version" "$major.$minor" "$major" main master latest; do
             docker buildx imagetools create \
               --tag "${DOCKERHUB_IMAGE}:${tag}" \
               "${IMAGE}@${BUILD_DIGEST}"
@@ -507,6 +508,7 @@ jobs:
           tags: |
             type=raw,value=browser,enable=${{ github.ref_type == 'tag' }}
             type=raw,value=main-browser,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=master-browser,enable=${{ github.ref_type == 'tag' }}
             type=raw,value=latest-browser,enable=${{ github.ref_type == 'tag' }}
             type=semver,pattern={{version}}-browser
             type=semver,pattern={{major}}.{{minor}}-browser
@@ -563,7 +565,7 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           IFS='.' read -r major minor _ <<< "$version"
-          for tag in "${version}-browser" "${major}.${minor}-browser" browser main-browser latest-browser; do
+          for tag in "${version}-browser" "${major}.${minor}-browser" browser main-browser master-browser latest-browser; do
             docker buildx imagetools create \
               --tag "${DOCKERHUB_IMAGE}:${tag}" \
               "${IMAGE}@${BUILD_DIGEST}"
