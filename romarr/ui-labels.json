@@ -18506,5 +18506,33 @@
     "zh-Hant": "串流主機和瀏覽器播放器為選用功能，不會阻止整理 ROM。",
     "vi": "Máy chủ phát trực tuyến và trình phát trên trình duyệt là tùy chọn; chúng không cản trở việc lưu ROM.",
     "id": "Host streaming dan pemutar browser bersifat opsional; keduanya tidak menghambat penyimpanan ROM."
+  },
+  "Patches": {
+    "es": "Parches",
+    "zh-Hans": "补丁",
+    "hi": "पैच",
+    "de": "Patches",
+    "ja": "パッチ",
+    "fr": "Correctifs",
+    "pt-BR": "Patches",
+    "ar": "التصحيحات",
+    "ko": "패치",
+    "zh-Hant": "修補",
+    "vi": "Bản vá",
+    "id": "Patch"
+  },
+  "Patches — translations, hacks and improvements": {
+    "es": "Parches: traducciones, hacks y mejoras",
+    "zh-Hans": "补丁：翻译、改版和改进",
+    "hi": "पैच: अनुवाद, हैक और सुधार",
+    "de": "Patches: Übersetzungen, Hacks und Verbesserungen",
+    "ja": "パッチ：翻訳、ハック、改善",
+    "fr": "Correctifs : traductions, hacks et améliorations",
+    "pt-BR": "Patches: traduções, hacks e melhorias",
+    "ar": "التصحيحات: ترجمات وتعديلات وتحسينات",
+    "ko": "패치: 번역, 핵, 개선",
+    "zh-Hant": "修補：翻譯、改版與改良",
+    "vi": "Bản vá: bản dịch, bản hack và cải tiến",
+    "id": "Patch: terjemahan, hack, dan peningkatan"
   }
 }

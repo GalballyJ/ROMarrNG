@@ -656,7 +656,7 @@ def _theme_control_html() -> str:
 # The nav, in *arr order. `count` names a stat the badge reads.
 NAV = [
     ("Library",  [("library", "Games", "games"), ("add", "Add New", None),
-                  ("discover", "Discover", None),
+                  ("discover", "Discover", None), ("patches", "Patches", None),
                   ("search", "Interactive Search", None)]),
     ("Wanted",   [("missing", "Missing", "missing"), ("lists", "Lists", None),
                   ("calendar", "Calendar", None)]),
@@ -1190,7 +1190,7 @@ function go(page){
     n.classList.toggle('on', n.dataset.page===page));
   const titles={library:'Games',add:'Add New Game',search:'Interactive Search',
     missing:'Wanted — Missing',lists:'Import Lists',stats:'Statistics',
-    discover:'Discover',ecosystem:'The Ecosystem',peers:'Friends',
+    discover:'Discover',patches:'Patches — translations, hacks and improvements',ecosystem:'The Ecosystem',peers:'Friends',
     queue:'Queue',history:'History',media:'Media Management',profiles:'Profiles',
     indexers:'Indexers',clients:'Download Clients',libraries:'Libraries',
     general:'General',
@@ -2846,6 +2846,46 @@ RENDER.queue=async()=>{
   };
   document.querySelectorAll('[data-qretry]').forEach(b=>b.onclick=()=>act(b.dataset.qretry,'retry'));
   document.querySelectorAll('[data-qremove]').forEach(b=>b.onclick=()=>act(b.dataset.qremove,'remove'));
+};
+
+RENDER.patches=async()=>{
+  const state={q:'',kind:'',complete:false};
+  const load=async()=>{
+    const qs=new URLSearchParams({limit:'48'});
+    if(state.q) qs.set('q',state.q);
+    if(state.kind) qs.set('kind',state.kind);
+    if(state.complete) qs.set('completeOnly','true');
+    const d=await j('/api/v1/patches/search?'+qs);
+    const rows=d.results||[];
+    $('#patch-results').innerHTML=rows.length?`<table><thead><tr><th>Project</th>
+      <th>Game</th><th>Platform</th><th>Kind</th><th>Version</th><th>Status</th>
+      <th>Base game</th></tr></thead><tbody>${rows.map(p=>{
+        const v=(p.versions||[])[0]||{};
+        return `<tr><td>${esc(p.name||p.title||p.id)}</td>
+          <td>${esc((p.game||{}).title||'')}</td>
+          <td>${esc((p.game||{}).platformSlug||'')}</td>
+          <td>${esc(p.kind||'')}</td>
+          <td>${esc(v.label||v.version||'—')}</td>
+          <td>${esc(p.status||'')}${p.completeness?' · '+esc(p.completeness):''}</td>
+          <td>${(v.base||{}).available?'In library':'<span style="color:var(--dim)">Not in library</span>'}</td></tr>`;
+      }).join('')}</tbody></table>`
+      :'<div class="empty">No patch projects match. Add a catalogue in Media Management or drop JSON files into the patch-catalog.d folder.</div>';
+  };
+  $('#page').innerHTML=`<div style="color:var(--dim);font-size:11.5px;margin-bottom:10px">
+      Projects come from your own catalogue only. Completeness is what a project
+      states, never a guess. Requests come from SeerrNG.</div>
+    <div class="field" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input type="search" id="patch-q" aria-label="Search patch projects" placeholder="Search">
+      <select id="patch-kind" aria-label="Kind"><option value="">All kinds</option>
+        <option value="translation">Translations</option><option value="hack">Hacks</option>
+        <option value="improvement">Improvements</option></select>
+      <label class="check"><input type="checkbox" id="patch-complete"><span>Complete only</span></label>
+    </div>
+    <div id="patch-results" aria-live="polite"></div>`;
+  $('#patch-q').addEventListener('input',e=>{state.q=e.target.value;load();});
+  $('#patch-kind').addEventListener('change',e=>{state.kind=e.target.value;load();});
+  $('#patch-complete').addEventListener('change',e=>{state.complete=e.target.checked;load();});
+  load();
 };
 
 RENDER.history=async()=>{

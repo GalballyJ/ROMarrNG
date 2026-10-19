@@ -44,6 +44,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
                             "origin and source."),
     "/api/v1/integration/ping": ("GET", "Authenticated version handshake for "
                                          "SeerrNG software requests."),
+    "/api/v1/patches/search": ("GET", "Search patch projects for the Patches page."),
     "/api/v1/integration/patches/search": ("GET", "Search translation, hack and improvement projects."),
     "/api/v1/integration/patches/projects/{projectId}": ("GET", "Read one patch project with its versions."),
     "/api/v1/integration/info": ("GET", "ROMarrNG service identity and external-platform capabilities."),

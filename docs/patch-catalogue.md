@@ -71,3 +71,7 @@ Failure codes reported to SeerrNG: `BASE_MISSING`, `BASE_MISMATCH`, `BASE_UNSUPP
 - `POST /api/integration/seerrng/v1/requests` accepts `selection: { "kind": "patch", "projectId", "versionId", "keepOriginal" }`.
 
 The ping handshake reports `capabilities.patchCatalog: true`.
+
+## Patches page
+
+The **Patches** entry under Library in ROMarrNG's own UI lists the loaded projects with kind, version, stated completeness, and whether the base game is in your library. It can search and filter by kind and completeness. It is read-only; requests come from SeerrNG.

@@ -5706,7 +5706,8 @@ def make_handler(service: ROMarr):
                                   "text/html; charset=utf-8")
 
             # --- *arr-shaped API ---------------------------------------
-            if route.path == "/api/v1/integration/patches/search":
+            if route.path in ("/api/v1/integration/patches/search",
+                              "/api/v1/patches/search"):
                 def one(name: str, limit: int = 128) -> str:
                     return ((query.get(name) or [""])[0])[:limit]
                 try:
