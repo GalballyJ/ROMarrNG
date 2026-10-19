@@ -315,6 +315,15 @@ platform matching, Prowlarr/direct indexer search, download-client handoff,
 verification, and library import. The maintained container is
 `ghcr.io/snapetech/romarrng:latest`.
 
+**Translations, hacks, and improvements.** ROMarrNG can list fan-translation,
+ROM-hack, and improvement projects with their versions and completeness, and
+prepare the exact version SeerrNG requests against the correct base game:
+IPS, UPS, and BPS patches are applied with checksum verification, downloads
+are `https` from public addresses only, and the original is never overwritten.
+Nothing is bundled; add JSON files to `patch-catalog.d` next to your data file
+or set a catalogue URL. Completeness is only what a project states. See the
+[patch catalogue guide](docs/patch-catalogue.md).
+
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v1/integration/ping` | Report integration/API versions and available capabilities. |
@@ -322,6 +331,8 @@ verification, and library import. The maintained container is
 | `GET` | `/api/v1/integration/catalog/popular-page` | Browse popular IGDB titles with the same filters. |
 | `GET` | `/api/v1/integration/catalog/platforms` | List IGDB platform IDs and names. |
 | `GET` | `/api/v1/integration/catalog/games/{igdbId}` | Read one game's IGDB catalog details. |
+| `GET` | `/api/integration/seerrng/v1/patches/search` | Search translation, hack, and improvement projects. |
+| `GET` | `/api/integration/seerrng/v1/patches/projects/{projectId}` | Read one project with its versions and whether each version's base game is in the library. |
 | `GET` | `/api/integration/seerrng/v1/catalog/dat/platforms` | List DAT-backed systems and unmatched DAT names. |
 | `GET` | `/api/integration/seerrng/v1/catalog/dat/search-page` | Search loaded DAT titles by name and optional system. |
 | `GET` | `/api/integration/seerrng/v1/catalog/dat/browse-page` | Browse loaded DAT titles alphabetically. |

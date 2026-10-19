@@ -157,6 +157,12 @@ messages are generic; the request status response never includes local asset
 paths. Status values include `searching`, `downloading`, `available`,
 `failed`, and `cancelled`.
 
+## Patch catalogue and patch requests
+
+The handshake reports `capabilities.patchCatalog: true` when the patch catalogue is available. `GET /patches/search` accepts `q`, `platform`, `kind` (`translation`, `hack`, `improvement`), `language`, `completeOnly`, `catalogKey`, `limit`, and `cursor`, and returns projects with `versions[]`, `status`, optional `completeness`, and `base.available` per version. Download addresses are never returned.
+
+`POST /requests` accepts `selection: { "kind": "patch", "projectId", "versionId", "keepOriginal" }`. The request is available only when the patched file exists; the base game alone never completes it. Status adds `selection.state` (`pending`, `preparing`, `prepared`, `failed`) and these failure codes: `BASE_MISSING`, `BASE_MISMATCH`, `BASE_UNSUPPORTED`, `PATCH_UNREACHABLE`, `PATCH_CORRUPT`, `PATCH_FORMAT`, `PATCH_UNKNOWN`, `PATCH_FAILED`. Catalogue format and behaviour: [patch-catalogue.md](./patch-catalogue.md).
+
 ## Retry and cancel
 
 `POST /api/v1/integration/requests/{externalRequestId}/retry` retries a failed
