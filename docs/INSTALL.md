@@ -92,7 +92,7 @@ docker run -d --name romarr \
   -p 6868:6868 \
   -e PUID=1000 -e PGID=1000 -e UMASK=002 -e TZ=Etc/UTC \
   -v /srv/romarr/config:/config \
-  ghcr.io/snapetech/romarrng:latest
+  ghcr.io/snapetech-org/romarrng:latest
 ```
 
 Open <http://localhost:6868> and set a password.
@@ -230,21 +230,20 @@ nothing to drop to and no authority to chown with.
 
 | Tag | What it is |
 |---|---|
-| `latest` | **Main.** Every push to the default branch that passed the test suite. This is the one that gets fixes. |
+| `latest`, `main`, `master`, `stable` | The same latest versioned stable release. |
 | `0.14` | The latest patch release in the `v0.14.x` series. |
 | `0.14.0` | Exactly the commit tagged `v0.14.0`. |
 | `sha-<commit>` | One specific commit. Every build publishes one. |
 
-Two things worth knowing before you pin:
+The rolling aliases move together when a new versioned release is published.
+Main-branch builds get a `sha-` tag and do not replace the stable aliases. The
+browser image has matching `browser`, `main-browser`, `master-browser`,
+`latest-browser`, and `stable-browser` aliases.
 
-- **`latest` is main, not a release.** It is ahead of `0.8.0`, and the version
-  string does not change between releases, so `0.8.0` and `latest` can both
-  report `0.8.0` while being different builds. `docker image inspect` on the
-  digest is the only reliable comparison.
-- Pinning `0.8.0` means you stop receiving fixes until the next tag. For a
-  service that reaches out to your indexers, `latest` is the recommended
-  default; use a `sha-` tag when you need to sit on a known-good build, and
-  see [Rolling back](#rolling-back).
+Pinning `0.8.0` means you stop receiving fixes until the next release. For a
+service that reaches out to your indexers, a rolling stable alias is the
+recommended default; use a `sha-` tag when you need to sit on a known-good
+build, and see [Rolling back](#rolling-back).
 
 The image is published for `linux/amd64`, `linux/arm64` and `linux/arm/v7`.
 **The armv7 leg has never been booted by the maintainer** — it is built in CI
@@ -757,9 +756,9 @@ docker compose up -d
 Your `/config` volume carries settings, history and credentials across. Nothing
 in the image is stateful.
 
-If you track `latest`, that is main — every push that passed the suite. An
-image pulled at a bad moment is rolled back the same way as anything else, see
-below.
+If you track a rolling alias such as `latest`, it stays on the latest
+versioned stable release. Main-branch builds use `sha-` tags and do not move
+these aliases. A new release moves the aliases together; see below to roll back.
 
 Running Watchtower or similar? It will update ROMarr whenever `latest` moves.
 That is a defensible choice for a service on your own LAN and a bad one if you
@@ -799,17 +798,17 @@ pinned:
 
 ```bash
 docker compose down
-# in docker-compose.yml:  image: ghcr.io/snapetech/romarrng:sha-<commit>
+# in docker-compose.yml:  image: ghcr.io/snapetech-org/romarrng:sha-<commit>
 docker compose up -d
 ```
 
 List what exists:
 
 ```bash
-TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:snapetech/romarrng:pull" \
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:snapetech-org/romarrng:pull" \
         | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 curl -s -H "Authorization: Bearer $TOKEN" \
-     https://ghcr.io/v2/snapetech/romarrng/tags/list
+     https://ghcr.io/v2/snapetech-org/romarrng/tags/list
 ```
 
 **A rollback is code-only.** If the version you are leaving wrote a setting the

@@ -20,7 +20,7 @@ brand, and changing them breaks existing installs:
   * `/opt/romarr`, `romarr.service`, `romarr.json`
   * the default download category `romarr`
   * the upstream image name `ghcr.io/blizzhacker/romarr` (separate from this
-    fork's `ghcr.io/snapetech/romarrng` image)
+    fork's `ghcr.io/snapetech-org/romarrng` image)
 """
 
 import io

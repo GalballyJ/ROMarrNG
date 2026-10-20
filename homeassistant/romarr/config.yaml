@@ -12,7 +12,7 @@ arch:
   - amd64
   - aarch64
   - armv7
-image: ghcr.io/snapetech/romarrng
+image: ghcr.io/snapetech-org/romarrng
 init: false
 ports:
   6868/tcp: 6868

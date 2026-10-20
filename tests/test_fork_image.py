@@ -21,5 +21,5 @@ def test_install_surfaces_use_romarrng_image() -> None:
         "homeassistant/romarr/config.yaml",
     ):
         content = (ROOT / file).read_text()
-        assert "ghcr.io/snapetech/romarrng" in content, file
+        assert "ghcr.io/snapetech-org/romarrng" in content, file
         assert "ghcr.io/blizzhacker/romarr:latest" not in content, file

@@ -5,4 +5,4 @@ area: containers
 action: none
 breaking: false
 ---
-ROMarrNG release images now keep `:main` and `:latest` on the same stable release. Main-branch CI uses commit-specific tags, and validated standard and browser images are mirrored to Docker Hub when publisher credentials are configured. Unraid templates follow the stable `:latest` aliases.
+The standard `:latest`, `:main`, `:master`, and `:stable` tags now track the latest versioned release in `ghcr.io/snapetech-org/romarrng`. Browser aliases track the matching browser release. Main-branch builds keep commit-specific `sha-*` tags, and CI checks that each rolling alias matches the stable release manifest.

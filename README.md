@@ -31,7 +31,7 @@ For local MCP access, see the [SnapeTech MCP integration guide](docs/integration
 
 
 On Unraid, the [ROMarrNG fork template](packaging/unraid/romarrng.xml) installs
-the standalone `ghcr.io/snapetech/romarrng:latest` image. Map persistent
+the standalone `ghcr.io/snapetech-org/romarrng:latest` image. Map persistent
 appdata to `/config`, your game library to `/roms`, and completed downloads to
 `/downloads`. Open the web interface on port 6868 to set your password and
 configure indexers and a download client. Connect SeerrNG if you want its
@@ -51,7 +51,7 @@ If you run Radarr for films and Sonarr for TV, this is the missing one.
 [![CI](https://github.com/snapetech-org/ROMarrNG/actions/workflows/docker.yml/badge.svg)](https://github.com/snapetech-org/ROMarrNG/actions/workflows/docker.yml)
 [![licence MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/snapetech-org/ROMarrNG)](https://github.com/snapetech-org/ROMarrNG/releases)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ed)](https://github.com/snapetech/ROMarrNG/pkgs/container/romarrng)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ed)](https://github.com/snapetech-org/ROMarrNG/pkgs/container/romarrng)
 [![platforms](https://img.shields.io/badge/arch-amd64%20%7C%20arm64%20%7C%20armv7-lightgrey)](#docker)
 
 ![Interactive search on a live install: 51 releases scored, the verified dump on top, every rejection explained](docs/img/interactive-search-live.png)
@@ -313,7 +313,7 @@ generated key is limited to the integration API; the main API key still works
 for existing setups. Requests then use ROMarrNG's normal
 platform matching, Prowlarr/direct indexer search, download-client handoff,
 verification, and library import. The maintained container is
-`ghcr.io/snapetech/romarrng:latest`.
+`ghcr.io/snapetech-org/romarrng:latest`.
 
 **Translations, hacks, and improvements.** ROMarrNG can list fan-translation,
 ROM-hack, and improvement projects with their versions and completeness, and
@@ -410,10 +410,15 @@ docker run -d --name romarr \
   -p 6868:6868 \
   -e PUID=1000 -e PGID=1000 -e UMASK=002 -e TZ=Etc/UTC \
   -v /srv/romarr/config:/config \
-  ghcr.io/snapetech/romarrng:latest
+  ghcr.io/snapetech-org/romarrng:latest
 ```
 
 Open `http://localhost:6868` and set a password.
+
+The rolling tags `latest`, `main`, `master`, and `stable` all point to the
+latest versioned release. The browser image uses matching `browser`,
+`main-browser`, `master-browser`, `latest-browser`, and `stable-browser` tags.
+Main-branch builds use `sha-*` tags so they do not move the stable aliases.
 
 `--restart unless-stopped` is not decoration: without it ROMarr does not come
 back after a host reboot, and the first sign is a week of missed scheduled
@@ -920,7 +925,7 @@ not include Playwright. Direct downloads work without it. The browser image
 adds the Playwright Python client on Debian but deliberately contains no
 Chromium; it connects to a separate browser server. Keep the client and server
 on the same Playwright version (the current image uses `1.62.0`). It is
-published as `ghcr.io/snapetech/romarrng:browser` for AMD64 and ARM64.
+published as `ghcr.io/snapetech-org/romarrng:browser` for AMD64 and ARM64.
 
 On Unraid, use the [ROMarrNG Browser template](packaging/unraid/romarrng-browser.xml)
 instead of the standard template. It uses the same `/config` appdata and port,
@@ -1043,6 +1048,10 @@ both the reported path and the resolved path.
 - Use a dedicated library account, not an administrator one.
 
 ## Development
+
+Install the repository hooks with `./scripts/install-git-hooks.sh`. The
+pre-push hook checks the canonical image references and verifies that all
+rolling GHCR aliases match the latest stable release.
 
 ```bash
 python -m pytest tests/ -q

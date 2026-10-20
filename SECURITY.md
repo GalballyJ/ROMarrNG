@@ -354,7 +354,7 @@ Stated so nobody assumes otherwise:
   equivalent settings applied by their operator.
 - **Published container images carry signed provenance and SPDX SBOM
   attestations.** Verify an image with `gh attestation verify
-  oci://ghcr.io/snapetech/romarrng:latest -R snapetech-org/ROMarrNG`. Attestations
+  oci://ghcr.io/snapetech-org/romarrng:latest -R snapetech-org/ROMarrNG`. Attestations
   identify build origin and the SBOM; they do not prove the software is safe.
 - **DAT verification is an integrity check, not a security control.** It tells
   you a file matches a known-good dump. It is not malware scanning, and an

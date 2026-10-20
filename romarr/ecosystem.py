@@ -150,7 +150,7 @@ ECOSYSTEM: dict[str, list[Project]] = {
             "ROMarr",
             "The *arr for games -- request it, ROMarr finds it and files it.",
             repo="https://github.com/snapetech-org/ROMarrNG",
-            install="docker pull ghcr.io/snapetech/romarrng:latest",
+            install="docker pull ghcr.io/snapetech-org/romarrng:latest",
             is_self=True),
         Project(
             "GG Requestz",

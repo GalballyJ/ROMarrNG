@@ -27,7 +27,7 @@ def test_musl_install_points_to_the_romarrng_browser_image(monkeypatch):
 
     message = str(error.value)
     assert "musl" in message
-    assert "ghcr.io/snapetech/romarrng:browser" in message
+    assert "ghcr.io/snapetech-org/romarrng:browser" in message
     assert "playwright run-server" in message
 
 

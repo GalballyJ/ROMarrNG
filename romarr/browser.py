@@ -126,7 +126,7 @@ def _playwright():
             raise Unavailable(
                 "Playwright cannot be installed in this Alpine (musl) image; "
                 "its Python wheels need glibc. Use the ROMarrNG browser image "
-                "ghcr.io/snapetech/romarrng:browser and point Browser Host at "
+                "ghcr.io/snapetech-org/romarrng:browser and point Browser Host at "
                 "a matching `playwright run-server`."
             ) from err
         raise Unavailable(

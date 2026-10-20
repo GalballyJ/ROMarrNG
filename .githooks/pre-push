@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+python3 scripts/check_image_alias_policy.py
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/tags/v*) ;;
+    *) continue ;;
+  esac
+
+  if [[ ! "$remote_ref" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Refusing malformed release tag: $remote_ref" >&2
+    exit 1
+  fi
+
+  version="$(sed -n 's/^VERSION = "\([^"]*\)"/\1/p' romarr/app.py | head -n 1)"
+  tag="${remote_ref#refs/tags/}"
+  if [[ "$tag" != "v$version" ]]; then
+    echo "Refusing $tag: ROMarr.VERSION is $version." >&2
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor "$local_sha^{commit}" refs/heads/main; then
+    echo "Refusing $tag: its commit is not on local main." >&2
+    exit 1
+  fi
+
+  latest_tag="$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)"
+  if [[ "$tag" != "$latest_tag" ]]; then
+    echo "Refusing $tag: $latest_tag is the newest local version tag." >&2
+    exit 1
+  fi
+done
+
+python3 scripts/check_stable_image_tags.py
