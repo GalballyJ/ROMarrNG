@@ -4,7 +4,7 @@
 
 ARG PLAYWRIGHT_VERSION=1.62.0
 
-FROM python:3.14-slim AS builder
+FROM python:3.15-slim AS builder
 
 ARG TARGETARCH
 ARG PLAYWRIGHT_VERSION
@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt \
         "rom-hub @ https://github.com/BlizzHacker/rom-hub/archive/8e46348783546ee03b00e2c933155ba60d29619d.tar.gz"; \
     fi
 
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 ARG PLAYWRIGHT_VERSION
 
