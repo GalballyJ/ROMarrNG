@@ -73,6 +73,8 @@ full claim-by-claim evidence file.*
   - **[The full install guide](docs/INSTALL.md)** — every variable, backup, upgrade, rollback, troubleshooting
 - [Setup experience contract](docs/design/setup-experience-contract.md) — apply guided setup through ROMarrNG's existing claim, settings, and status surfaces
 - [Signing in](#signing-in)
+- [OIDC authentication setup and recovery](docs/oidc-authentication.md) · [shared provider catalog](https://github.com/snapetech-org/seerrng/blob/main/docs/maintainers/oidc-provider-catalog.md)
+- [Documentation index](docs/README.md)
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Plugins](#plugins)

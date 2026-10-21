@@ -7,6 +7,10 @@ HttpOnly session cookie. Provider access and ID tokens are not stored in the
 browser or in ROMarr's state file. Password, API-key, and configured
 ForwardAuth login remain available.
 This adapter follows the [shared cross-project OIDC contract](https://github.com/snapetech-org/seerrng/blob/main/docs/maintainers/oidc-cross-project-template.md).
+The shared [provider catalog](https://github.com/snapetech-org/seerrng/blob/main/docs/maintainers/oidc-provider-catalog.md)
+lists the branded IDs, official setup pages, issuer examples, and scope/claim
+notes. The provider hint affects only the login button and its local setup
+link; the configured issuer remains authoritative.
 
 ## Configure the provider
 
@@ -33,7 +37,7 @@ ROMARR_OIDC_PROVIDER=authentik
 login button label, icon, and provider setup link. Discovery and issuer checks
 still use the configured issuer URL. Unknown values use generic OIDC branding.
 
-### Sign in with Apple
+## Sign in with Apple
 
 Set `ROMARR_OIDC_ISSUER_URL` to exactly `https://appleid.apple.com`, use the
 Apple Services ID as `ROMARR_OIDC_CLIENT_ID`, and set
@@ -80,3 +84,40 @@ login screen without exposing provider errors or tokens.
 The state transaction is held in process memory for ten minutes, with a
 bounded number of outstanding attempts. Restarting ROMarr invalidates pending
 OIDC callbacks; start a fresh login after a restart.
+
+## Enable, verify, and recover
+
+All four core settings—issuer, client ID, client secret, and redirect URI—must
+be present together. Store the secret in the protected service environment or
+deployment secret source, not in the browser, repository, or an issue. Register
+only the exact public HTTPS URI ending `/auth/oidc/callback`; the value in
+`ROMARR_OIDC_REDIRECT_URI` and the provider's callback entry must match.
+
+An exact email or domain admission grants the existing full ROMarr operator
+session. `ROMARR_OIDC_ALLOW_ANY_VERIFIED_USER=1` does the same for every
+verified provider identity, so use it only when the provider itself limits
+client access to the intended operators. ROMarr has no per-user role boundary
+for OIDC; provider groups do not add one. Keep password/API-key or configured
+ForwardAuth recovery working while testing.
+
+After applying a provider or secret change, begin a new login. Pending
+transactions live in process memory for ten minutes and a restart invalidates
+them. Verify the expected operator session with an admitted account, verify an
+unadmitted verified account is rejected, and exercise a non-OIDC recovery
+method. To disable OIDC, remove the four core settings from the service
+environment and redeploy; verify the local login route still works.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Redirect URI is rejected | Match the public HTTPS URL, port, path, and proxy prefix exactly against `ROMARR_OIDC_REDIRECT_URI`. |
+| Issuer discovery or token exchange fails | Compare the configured issuer with discovery metadata exactly; check DNS, CA trust, endpoint reachability, and the explicit private-issuer opt-in if the IdP is internal. |
+| Callback has missing/invalid state | Start a new login in the same browser and hostname. Check Secure cookie delivery, forwarded HTTPS/host headers, ten-minute expiry, and whether ROMarr restarted. |
+| Verified user is denied | Confirm the provider returns an email and affirmative `email_verified`, then check normalized addresses/domains and separators. No configured admission list means deny-by-default. |
+| Too many people receive operator access | Set `ROMARR_OIDC_ALLOW_ANY_VERIFIED_USER=0` and use exact address/domain admissions; inspect provider client assignment as a second boundary. |
+| Apple fails on its return POST | Verify the Services ID, exact Apple issuer, callback, form-post cookie behavior, `openid email`, and unexpired signed client-secret JWT. |
+
+For support, provide the ROMarr version, provider ID, redacted issuer host,
+callback path, and timestamp. Remove secrets, codes, tokens, raw claims, and
+complete callback query strings.
