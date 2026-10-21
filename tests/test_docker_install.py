@@ -208,7 +208,7 @@ def test_pull_request_image_validation_has_no_publish_permissions():
         assert "artifact-metadata: write" in job
 
     release_job = workflow.split("\n  release:\n", 1)[1]
-    assert "needs: [image_publish, image_browser_publish]" in release_job
+    assert "needs: [image_publish, image_browser_publish, verify-stable-image-tags]" in release_job
 
 
 def test_the_entrypoint_refuses_rather_than_letting_state_be_overwritten():

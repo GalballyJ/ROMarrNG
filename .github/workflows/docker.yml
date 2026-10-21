@@ -13,11 +13,12 @@ on:
 permissions:
   contents: read
 
-# Main builds can replace older main builds. Release builds share one queue so
-# an older release cannot finish later and overwrite the stable aliases.
+# Keep main builds independent so a newer push cannot cancel an earlier
+# candidate. Release tags share a queue so stable aliases stay in release order.
 concurrency:
-  group: docker-${{ startsWith(github.ref, 'refs/tags/v') && 'stable-releases' || github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+  group: docker-${{ startsWith(github.ref, 'refs/tags/v') && 'stable-releases' || github.run_id }}
+  queue: max
+  cancel-in-progress: false
 
 jobs:
   release-notes:
