@@ -1,4 +1,5 @@
 requests>=2.34.2
+Authlib>=1.6.7,<2
 pycryptodomex>=3.24.0
 
 # Lets ROM Hub confine plugin subprocesses with a seccomp filter. Without it

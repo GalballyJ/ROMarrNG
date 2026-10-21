@@ -92,7 +92,7 @@ install; the only way off is explicit.
   launched. A file that is merely *unparseable* still falls back to defaults,
   because nothing in it can be handed back.
 
-Exactly ten routes answer without a credential, and no others (this count is
+Exactly thirteen routes answer without a credential, and no others (this count is
 asserted against the code, not maintained by hand):
 
 | Route | Why |
@@ -101,6 +101,9 @@ asserted against the code, not maintained by hand):
 | `/login` | The sign-in screen. It has to answer somebody holding nothing. |
 | `/link` | Where a peering invitation link lands. A **constant page** — see below. |
 | `/api/v1/login` | Exchanges a password or key for a session. |
+| `/auth/oidc/login` | Starts the configured OIDC sign-in and creates a short-lived state cookie. |
+| `/auth/oidc/callback` | Completes OIDC sign-in only with the matching one-use state cookie. |
+| `/oidc-provider-icons.svg` | Serves the bundled login marks without an external image request. |
 | `/api/v1/setup` | First-run claim. Open only while unclaimed; `409` after. |
 | `/api/health` | Container health checks have no credential to offer. |
 | `/api/v1/connect/steam/return` | Steam's OpenID redirect. It *cannot* carry the session cookie — see below. |

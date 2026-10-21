@@ -73,6 +73,7 @@ from .library import TRANSLATION_SUBDIR
 from .patches import PatchCatalog, PatchError, prepare_patched_file, public_project
 from .auth import DISABLED as AUTH_DISABLED
 from .auth import MIN_PASSWORD, SESSION_COOKIE, Auth, new_api_key, parse_cookies
+from .oidc import OIDCAuth, OIDCAuthError, OIDCSettings, safe_return_to
 from .capture import MAX_BODY_BYTES as CAPTURE_MAX_BODY
 from .capture import Rejected as CaptureRejected
 from .capture import index_dir as capture_index_dir
@@ -1174,6 +1175,7 @@ class ROMarr:
             password_hash=self.store.settings.get("_password_hash", ""),
             enabled=mode != AUTH_DISABLED,
         )
+        self.oidc = OIDCAuth(OIDCSettings.from_env(e))
 
         # A password handed in by the environment claims the install before it
         # ever serves a request, which is what a container template should do:
@@ -1195,7 +1197,7 @@ class ROMarr:
         # every request, while the log pointed at a Settings page that was
         # itself behind the gate.
         self.claimed = bool(self.store.settings.get("_password_hash")
-                            or supplied_key)
+                            or supplied_key or self.oidc.enabled)
         if self.auth.enabled and not self.claimed:
             log.warning(
                 "ROMarr is unclaimed: the first visitor to the web UI sets the "
@@ -5395,6 +5397,52 @@ def make_handler(service: ROMarr):
             self.end_headers()
             self.wfile.write(body)
 
+        def _redirect(self, location: str, *, clear_oidc_state: bool = False):
+            self.send_response(303)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            if clear_oidc_state:
+                self._clear_oidc_state_cookie()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _clear_oidc_state_cookie(self):
+            same_site = "None" if service.oidc.apple_issuer else "Lax"
+            self.send_header(
+                "Set-Cookie",
+                f"romarr_oidc_state=; HttpOnly; SameSite={same_site}; Secure; "
+                "Path=/auth/oidc/; Max-Age=0",
+            )
+
+        def _complete_oidc_callback(self, state: str, code: str, error: str = ""):
+            if not service.auth.enabled or not service.oidc.enabled:
+                return self._send(404, b"not found")
+            cookie_state = parse_cookies(
+                self.headers.get("Cookie", "")
+            ).get("romarr_oidc_state", "")
+            if error or not state or not code or len(state) > 256 or len(code) > 8192:
+                return self._redirect(
+                    "/login?oidcFailed=true", clear_oidc_state=True
+                )
+            try:
+                _, subject, return_to = service.oidc.finish(
+                    state, cookie_state, code
+                )
+            except OIDCAuthError as error:
+                log.warning("OIDC login failed (%s)", error.code)
+                return self._redirect(
+                    "/login?oidcFailed=true", clear_oidc_state=True
+                )
+            token = service.auth.issue_session({
+                "iss": service.oidc.settings.issuer_url,
+                "sub": subject,
+            })
+            return self._send_session(
+                token, {"ok": True}, redirect_to=return_to,
+                force_secure=True, clear_oidc_state=True,
+            )
+
         def _json(self, code: int, payload):
             self._send(code, json.dumps(payload).encode(), "application/json")
 
@@ -5447,6 +5495,8 @@ def make_handler(service: ROMarr):
         #: returns identical bytes to every caller. The invitation id is in
         #: the URL fragment, which never reaches this server at all.
         OPEN_PATHS = ("/", "/login", "/link", "/api/health", "/api/v1/login",
+                      "/auth/oidc/login", "/auth/oidc/callback",
+                      "/oidc-provider-icons.svg",
                       "/api/v1/setup", "/api/v1/connect/steam/return",
                       # Peer-facing: authenticated by peer id + token in
                       # headers, which is a DIFFERENT credential from the
@@ -5455,7 +5505,10 @@ def make_handler(service: ROMarr):
                       "/api/v1/peer/accept", "/api/v1/peer/shelf",
                       "/api/v1/peer/netplay")
 
-        def _send_session(self, token: str, payload: dict):
+        def _send_session(self, token: str, payload: dict, *,
+                          redirect_to: str | None = None,
+                          force_secure: bool = False,
+                          clear_oidc_state: bool = False):
             """Answer with a session cookie set.
 
             Shared by login and first-run setup so the cookie's flags are
@@ -5464,17 +5517,26 @@ def make_handler(service: ROMarr):
             Secure: ROMarr is normally plain http on a LAN, and a Secure
             cookie would simply never be stored there.
             """
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_response(303 if redirect_to else 200)
+            if redirect_to:
+                self.send_header("Location", redirect_to)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Referrer-Policy", "no-referrer")
+            else:
+                self.send_header("Content-Type", "application/json")
+            if clear_oidc_state:
+                self._clear_oidc_state_cookie()
             secure_cookie = str(service._env.get(
                 "ROMARR_COOKIE_SECURE", "")).strip().lower() in ("1", "true", "yes")
+            secure_cookie = secure_cookie or force_secure
             secure_flag = "; Secure" if secure_cookie else ""
+            same_site = "Lax" if redirect_to else "Strict"
             self.send_header(
                 "Set-Cookie",
-                f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; "
+                f"{SESSION_COOKIE}={token}; HttpOnly; SameSite={same_site}; "
                 f"Path=/; Max-Age={service.auth.session_seconds}"
                 f"{secure_flag}")
-            raw = json.dumps(payload).encode()
+            raw = b"" if redirect_to else json.dumps(payload).encode()
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             return self.wfile.write(raw)
@@ -5683,6 +5745,43 @@ def make_handler(service: ROMarr):
                 # are holding and get them onto their OWN server with it.
                 return self._send(200, ui_link_page().encode("utf-8"),
                                   "text/html; charset=utf-8")
+            if route.path == "/oidc-provider-icons.svg":
+                try:
+                    icon_asset = Path(__file__).with_name("oidc-provider-icons.svg").read_bytes()
+                except OSError:
+                    return self._send(404, b"not found", "text/plain; charset=utf-8")
+                return self._send(200, icon_asset, "image/svg+xml; charset=utf-8")
+            if route.path == "/auth/oidc/login":
+                if not service.auth.enabled or not service.oidc.enabled:
+                    return self._send(404, b"not found")
+                try:
+                    authorize_url, state, ttl = service.oidc.begin(
+                        (query.get("next") or [""])[0]
+                    )
+                except OIDCAuthError as error:
+                    log.warning("OIDC login could not start (%s)", error.code)
+                    return self._redirect(
+                        "/login?oidcFailed=true", clear_oidc_state=True
+                    )
+                secure_flag = "; Secure"
+                self.send_response(303)
+                self.send_header("Location", authorize_url)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Referrer-Policy", "no-referrer")
+                same_site = "None" if service.oidc.apple_issuer else "Lax"
+                self.send_header(
+                    "Set-Cookie",
+                    f"romarr_oidc_state={state}; HttpOnly; SameSite={same_site}; "
+                    f"Path=/auth/oidc/; Max-Age={ttl}{secure_flag}",
+                )
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            if route.path == "/auth/oidc/callback":
+                state = (query.get("state") or [""])[0]
+                code = (query.get("code") or [""])[0]
+                error = (query.get("error") or [""])[0]
+                return self._complete_oidc_callback(state, code, error)
             if route.path in ("/", "/login"):
                 # The app shell only for somebody who is already in. Serving
                 # it to everybody is what made issue #8 so confusing: the UI
@@ -5692,7 +5791,10 @@ def make_handler(service: ROMarr):
                     return self._send(
                         200,
                         ui_login_page(claimed=service.claimed,
-                                      totp=service.auth.totp.enabled)
+                                      totp=service.auth.totp.enabled,
+                                      oidc_enabled=service.oidc.enabled,
+                                      oidc_provider=service.oidc.settings.provider,
+                                      oidc_failed=(query.get("oidcFailed") or [""])[0] == "true")
                         .encode("utf-8"),
                         "text/html; charset=utf-8")
                 if route.path == "/login":
@@ -6553,6 +6655,35 @@ def make_handler(service: ROMarr):
                 return self._json(400, {"error": "invalid content length"})
             if length < 0:
                 return self._json(400, {"error": "invalid content length"})
+            if route.path == "/auth/oidc/callback":
+                if not service.oidc.apple_issuer:
+                    self._discard(length)
+                    return self._json(405, {"error": "form-post callback is not enabled"})
+                if length > 16 * 1024:
+                    self._discard(length)
+                    return self._json(413, {"error": "OIDC callback is too large"})
+                content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                if content_type != "application/x-www-form-urlencoded":
+                    self._discard(length)
+                    return self._json(400, {"error": "invalid OIDC callback content type"})
+                raw = self.rfile.read(length) if length else b""
+                if len(raw) != length:
+                    self.close_connection = True
+                    return self._json(400, {"error": "incomplete OIDC callback"})
+                try:
+                    form = parse_qs(
+                        raw.decode("utf-8", errors="strict"),
+                        keep_blank_values=True,
+                        max_num_fields=32,
+                    )
+                except (UnicodeDecodeError, ValueError):
+                    return self._json(400, {"error": "invalid OIDC callback form"})
+                if any(len(form.get(key, [])) > 1 for key in ("state", "code", "error")):
+                    return self._json(400, {"error": "duplicate OIDC callback parameter"})
+                state = (form.get("state") or [""])[0]
+                code = (form.get("code") or [""])[0]
+                error = (form.get("error") or [""])[0]
+                return self._complete_oidc_callback(state, code, error)
             if (route.path == "/api/v1/integration/library/lookup"
                     and length > 65536):
                 self._discard(length)
