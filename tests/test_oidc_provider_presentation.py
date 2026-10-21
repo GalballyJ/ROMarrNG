@@ -1,4 +1,4 @@
-from romarr.oidc import OIDCSettings, oidc_provider_presentation
+from romarr.oidc import OIDCSettings, oidc_provider_presentation, oidc_state_cookie_name
 from romarr.ui import login_page
 
 
@@ -43,3 +43,12 @@ def test_provider_hint_is_display_only_and_login_uses_local_icon():
     assert "Continue with Keycloak" in page
     assert "/oidc-provider-icons.svg#oidc-keycloak" in page
     assert "https://www.keycloak.org/docs/latest/server_admin/" in page
+
+
+def test_oidc_state_cookies_are_isolated_per_transaction():
+    first = oidc_state_cookie_name("first-flow")
+    second = oidc_state_cookie_name("second-flow")
+
+    assert first.startswith("romarr_oidc_state_")
+    assert first != second
+    assert len(first) == len("romarr_oidc_state_") + 32

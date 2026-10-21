@@ -4841,7 +4841,9 @@ def login_page(*, claimed: bool, totp: bool = False,
                 f'<use href="/oidc-provider-icons.svg#oidc-{provider_icon}"></use></svg>'
                 f'Continue with {provider_label}</a>'
                 f'<a class="oidc-provider-help" href="{provider_setup_url}" '
-                'target="_blank" rel="noopener noreferrer">Provider setup guide</a>'
+                f'aria-label="{provider_label} identity provider setup guide (opens in a new tab)" '
+                'target="_blank" rel="noopener noreferrer">'
+                f'Setup guide for {provider_label} <span aria-hidden="true">↗</span></a>'
             )
         else:
             oidc_entry = ""
@@ -4888,7 +4890,7 @@ def login_page(*, claimed: bool, totp: bool = False,
   <div class="sub" data-i18n="{title}">{title}</div>
   {fields}
   <button type="submit" id="go">{action}</button>
-  <div class="err{' on' if oidc_error else ''}" id="err">{oidc_error}</div>
+  <div class="err{' on' if oidc_error else ''}" id="err" role="alert" aria-live="assertive">{oidc_error}</div>
   {oidc_entry}
   <div class="note" data-i18n="{note}">{note}</div>
 </form>

@@ -22,7 +22,7 @@ from authlib.oidc.core import CodeIDToken
 
 log = logging.getLogger(__name__)
 
-_MAX_TRANSACTIONS = 256
+_MAX_TRANSACTIONS = 16
 _TRANSACTION_TTL = 10 * 60
 _MAX_RESPONSE_BYTES = 1 << 20
 _ALLOWED_ID_TOKEN_ALGORITHMS = (
@@ -33,7 +33,7 @@ _ALLOWED_ID_TOKEN_ALGORITHMS = (
 _PROVIDER_PRESENTATION = {
     "google": ("Google", "google", "https://developers.google.com/identity/openid-connect/openid-connect"),
     "microsoft-entra": ("Microsoft Entra ID", "microsoft", "https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc"),
-    "okta": ("Okta", "okta", "https://developer.okta.com/docs/guides/implement-grant-type/-/main/"),
+    "okta": ("Okta", "okta", "https://developer.okta.com/docs/guides/implement-grant-type/authcodepkce/main/"),
     "auth0": ("Auth0", "auth0", "https://auth0.com/docs/get-started/authentication-and-authorization-flow/authorization-code-flow"),
     "keycloak": ("Keycloak", "keycloak", "https://www.keycloak.org/docs/latest/server_admin/"),
     "authentik": ("authentik", "authentik", "https://docs.goauthentik.io/add-secure-apps/providers/oauth2/create-oauth2-provider/"),
@@ -55,6 +55,12 @@ def oidc_provider_presentation(provider: str):
         key,
         ("identity provider", "generic", "https://openid.net/developers/how-connect-works/"),
     )
+
+
+def oidc_state_cookie_name(state: str) -> str:
+    """Bind each browser cookie to one short-lived authorization transaction."""
+    suffix = hashlib.sha256(state.encode("utf-8")).hexdigest()[:32]
+    return f"romarr_oidc_state_{suffix}"
 
 
 @dataclass(frozen=True)
@@ -175,16 +181,6 @@ class OIDCAuth:
             return_to=safe_return_to(return_to),
             expires_at=time.time() + _TRANSACTION_TTL,
         )
-        with self._lock:
-            now = time.time()
-            self._transactions = {
-                key: value for key, value in self._transactions.items()
-                if value.expires_at > now
-            }
-            if len(self._transactions) >= _MAX_TRANSACTIONS:
-                raise OIDCAuthError("too_many_transactions")
-            self._transactions[state] = transaction
-
         query = {
             "response_type": "code",
             "client_id": self.settings.client_id,
@@ -209,6 +205,15 @@ class OIDCAuth:
             parts.scheme, parts.netloc, parts.path,
             urlencode(existing + list(query.items())), parts.fragment,
         ))
+        with self._lock:
+            now = time.time()
+            self._transactions = {
+                key: value for key, value in self._transactions.items()
+                if value.expires_at > now
+            }
+            if len(self._transactions) >= _MAX_TRANSACTIONS:
+                raise OIDCAuthError("too_many_transactions")
+            self._transactions[state] = transaction
         return authorize_url, state, _TRANSACTION_TTL
 
     def finish(self, state: str, cookie_state: str, code: str) -> tuple[str, str, str]:

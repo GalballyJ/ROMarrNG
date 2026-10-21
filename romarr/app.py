@@ -73,7 +73,10 @@ from .library import TRANSLATION_SUBDIR
 from .patches import PatchCatalog, PatchError, prepare_patched_file, public_project
 from .auth import DISABLED as AUTH_DISABLED
 from .auth import MIN_PASSWORD, SESSION_COOKIE, Auth, new_api_key, parse_cookies
-from .oidc import OIDCAuth, OIDCAuthError, OIDCSettings, safe_return_to
+from .oidc import (
+    OIDCAuth, OIDCAuthError, OIDCSettings, oidc_state_cookie_name,
+    safe_return_to,
+)
 from .capture import MAX_BODY_BYTES as CAPTURE_MAX_BODY
 from .capture import Rejected as CaptureRejected
 from .capture import index_dir as capture_index_dir
@@ -5397,22 +5400,23 @@ def make_handler(service: ROMarr):
             self.end_headers()
             self.wfile.write(body)
 
-        def _redirect(self, location: str, *, clear_oidc_state: bool = False):
+        def _redirect(self, location: str, *, clear_oidc_state: bool = False,
+                      oidc_state: str = ""):
             self.send_response(303)
             self.send_header("Location", location)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Referrer-Policy", "no-referrer")
-            if clear_oidc_state:
-                self._clear_oidc_state_cookie()
+            if clear_oidc_state and oidc_state:
+                self._clear_oidc_state_cookie(oidc_state)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
-        def _clear_oidc_state_cookie(self):
+        def _clear_oidc_state_cookie(self, oidc_state: str):
             same_site = "None" if service.oidc.apple_issuer else "Lax"
             self.send_header(
                 "Set-Cookie",
-                f"romarr_oidc_state=; HttpOnly; SameSite={same_site}; Secure; "
-                "Path=/auth/oidc/; Max-Age=0",
+                f"{oidc_state_cookie_name(oidc_state)}=; HttpOnly; "
+                f"SameSite={same_site}; Secure; Path=/auth/oidc/; Max-Age=0",
             )
 
         def _complete_oidc_callback(self, state: str, code: str, error: str = ""):
@@ -5420,10 +5424,11 @@ def make_handler(service: ROMarr):
                 return self._send(404, b"not found")
             cookie_state = parse_cookies(
                 self.headers.get("Cookie", "")
-            ).get("romarr_oidc_state", "")
+            ).get(oidc_state_cookie_name(state), "")
             if error or not state or not code or len(state) > 256 or len(code) > 8192:
                 return self._redirect(
-                    "/login?oidcFailed=true", clear_oidc_state=True
+                    "/login?oidcFailed=true", clear_oidc_state=True,
+                    oidc_state=state,
                 )
             try:
                 _, subject, return_to = service.oidc.finish(
@@ -5432,7 +5437,8 @@ def make_handler(service: ROMarr):
             except OIDCAuthError as error:
                 log.warning("OIDC login failed (%s)", error.code)
                 return self._redirect(
-                    "/login?oidcFailed=true", clear_oidc_state=True
+                    "/login?oidcFailed=true", clear_oidc_state=True,
+                    oidc_state=state,
                 )
             token = service.auth.issue_session({
                 "iss": service.oidc.settings.issuer_url,
@@ -5440,7 +5446,7 @@ def make_handler(service: ROMarr):
             })
             return self._send_session(
                 token, {"ok": True}, redirect_to=return_to,
-                force_secure=True, clear_oidc_state=True,
+                force_secure=True, clear_oidc_state=True, oidc_state=state,
             )
 
         def _json(self, code: int, payload):
@@ -5508,7 +5514,8 @@ def make_handler(service: ROMarr):
         def _send_session(self, token: str, payload: dict, *,
                           redirect_to: str | None = None,
                           force_secure: bool = False,
-                          clear_oidc_state: bool = False):
+                          clear_oidc_state: bool = False,
+                          oidc_state: str = ""):
             """Answer with a session cookie set.
 
             Shared by login and first-run setup so the cookie's flags are
@@ -5524,8 +5531,8 @@ def make_handler(service: ROMarr):
                 self.send_header("Referrer-Policy", "no-referrer")
             else:
                 self.send_header("Content-Type", "application/json")
-            if clear_oidc_state:
-                self._clear_oidc_state_cookie()
+            if clear_oidc_state and oidc_state:
+                self._clear_oidc_state_cookie(oidc_state)
             secure_cookie = str(service._env.get(
                 "ROMARR_COOKIE_SECURE", "")).strip().lower() in ("1", "true", "yes")
             secure_cookie = secure_cookie or force_secure
@@ -5760,9 +5767,7 @@ def make_handler(service: ROMarr):
                     )
                 except OIDCAuthError as error:
                     log.warning("OIDC login could not start (%s)", error.code)
-                    return self._redirect(
-                        "/login?oidcFailed=true", clear_oidc_state=True
-                    )
+                    return self._redirect("/login?oidcFailed=true")
                 secure_flag = "; Secure"
                 self.send_response(303)
                 self.send_header("Location", authorize_url)
@@ -5771,7 +5776,7 @@ def make_handler(service: ROMarr):
                 same_site = "None" if service.oidc.apple_issuer else "Lax"
                 self.send_header(
                     "Set-Cookie",
-                    f"romarr_oidc_state={state}; HttpOnly; SameSite={same_site}; "
+                    f"{oidc_state_cookie_name(state)}={state}; HttpOnly; SameSite={same_site}; "
                     f"Path=/auth/oidc/; Max-Age={ttl}{secure_flag}",
                 )
                 self.send_header("Content-Length", "0")

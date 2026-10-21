@@ -72,18 +72,20 @@ bounded time and response size.
 
 ## Provider flow
 
-The login button starts a one-time state and nonce transaction, binds it to an
-HttpOnly browser cookie, and sends an S256 PKCE challenge for ordinary
-providers. Apple uses a cross-site form callback without PKCE. The callback checks
-the state, exchanges the authorization code server-side, validates the ID
-token signature and required issuer, audience, lifetime, and nonce claims,
+The login button starts a one-time state and nonce transaction, binds it to a
+distinct HttpOnly browser cookie, and sends an S256 PKCE challenge for ordinary
+providers. Up to 16 attempts can be pending; another start is rejected until
+one completes or expires. Apple uses a cross-site form callback without PKCE.
+The callback checks the state, exchanges the authorization code server-side,
+validates the ID token signature and required issuer, audience, lifetime, and nonce claims,
 then confirms the verified email and issues the local ROMarr session. The
 return path is restricted to a local path. A failed sign-in returns to the
 login screen without exposing provider errors or tokens.
 
-The state transaction is held in process memory for ten minutes, with a
-bounded number of outstanding attempts. Restarting ROMarr invalidates pending
-OIDC callbacks; start a fresh login after a restart.
+The state transaction is held in process memory for ten minutes. Restarting
+ROMarr invalidates pending OIDC callbacks; start a fresh login after a restart.
+The callback accepts ordinary GET responses and Apple's URL-encoded POST
+response, so reverse proxies must preserve the request method and form body.
 
 ## Enable, verify, and recover
 
