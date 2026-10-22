@@ -59,8 +59,12 @@ def main() -> int:
             problems.append(f"Docker workflow still contains obsolete publisher reference: {obsolete}")
     if "name=ghcr.io/${GITHUB_REPOSITORY,,}" not in workflow:
         problems.append("Docker workflow must publish to the current repository's GHCR package")
-    if "group: docker-${{ startsWith(github.ref, 'refs/tags/v') && 'stable-releases' || github.ref }}" not in workflow:
+    if "group: docker-${{ startsWith(github.ref, 'refs/tags/v') && 'stable-releases' || github.run_id }}" not in workflow:
         problems.append("Version-tag builds must share a serialized stable-release queue")
+    if "queue: max" not in workflow:
+        problems.append("Docker workflow must preserve queued builds instead of replacing them")
+    if "cancel-in-progress: false" not in workflow:
+        problems.append("Docker workflow must not cancel earlier builds")
     if "python scripts/check_stable_image_tags.py" not in workflow:
         problems.append("Docker workflow must verify published aliases against the stable release")
 

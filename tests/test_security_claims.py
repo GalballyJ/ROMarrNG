@@ -37,6 +37,8 @@ def test_the_documented_open_paths_are_the_actual_open_paths(doc, tmp_path):
     # somebody else's operator with no account here. It is on this list
     # because it is a CONSTANT -- see the guarantee asserted just below.
     assert actual == {"/", "/login", "/link", "/api/health", "/api/v1/login",
+                      "/auth/oidc/login", "/auth/oidc/callback",
+                      "/oidc-provider-icons.svg",
                       "/api/v1/setup",
                       "/api/v1/connect/steam/return",
                       "/api/v1/peer/accept", "/api/v1/peer/shelf",
@@ -48,7 +50,7 @@ def test_the_documented_open_paths_are_the_actual_open_paths(doc, tmp_path):
     # long enough that nobody noticed. A number in a security document is a
     # claim like any other.
     spelled = {5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
-               10: "ten", 11: "eleven", 12: "twelve"}[len(actual)]
+               10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen"}[len(actual)]
     assert f"Exactly {spelled} routes answer without a credential" in doc
 
 
@@ -76,9 +78,9 @@ def test_the_session_cookie_flags_match(doc):
     cookie = re.search(r"SESSION_COOKIE\}=\{token\};([^\"]*)", source)
     assert cookie, "the session cookie is no longer set where expected"
     flags = cookie.group(1)
-    assert "HttpOnly" in flags and "SameSite=Strict" in flags
-    assert "Secure" not in flags, (
-        "SECURITY.md explains why the cookie is not Secure; that changed")
+    assert "HttpOnly" in flags and "SameSite={same_site}" in flags
+    assert 'same_site = "Lax" if redirect_to else "Strict"' in source
+    assert "secure_cookie = secure_cookie or force_secure" in source
     assert "HttpOnly" in doc and "SameSite=Strict" in doc
 
 

@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.14.11] - 2026-10-21
+
+### User-facing changes
+
+#### Added
+
+- **Authentication:** ROMarrNG now supports operator sign-in through an OpenID Connect provider, with explicit verified-email admission and the existing local login options preserved.
+- **Webui:** The interface now offers twelve selectable languages with translated navigation, settings, help, validation, and app-owned statuses. Arabic labels use right-to-left direction metadata inside the left-to-right shell; full RTL support remains unreviewed. Date and number formatting stays separate, and game titles, platform names, paths, API responses, and other user data remain unchanged.
+- **Patches:** ROMarrNG can now list translation, ROM-hack, and improvement projects with their versions and completeness, prepare the exact version SeerrNG requests against the correct base game, and keep the original alongside it.
+  - **Action required:** Optional: add JSON files to the patch-catalog.d folder, or set a patch catalogue URL, to list translation and hack projects.
+
+#### Changed
+
+- **Unraid:** The ROMarrNG and browser Unraid templates now use moving main tags under the canonical organization image. Validated main builds publish main and main-browser for their matching image variants.
+- **Setup:** ROMarr now explains when release search or grabs need an indexer or download client, shows client path guidance beside the library destination, and links DAT checks, import lists, plugins, and player integrations as optional follow-ups.
+- **Authentication:** ROMarrNG OIDC guidance now explains provider setup, operator admission, callback recovery, secret handling, and troubleshooting for administrators.
+- **Validation:** ROMarrNG now runs its independent offline test files in a bounded two-task pool, reducing CI wait time while preserving pytest's configured exclusions, per-task counts, and the source receipt checked before image builds. Failed shard logs are retained with their receipt so CI failures can be diagnosed from the exact run.
+- **Release Pipeline:** Trusted main Docker validation can use the restricted organization runner pool when enabled; pull requests and other refs remain on GitHub-hosted runners.
+- **Repository:** ROMarrNG installer, download, and support links now use the snapetech-org repository address. Existing container image names remain unchanged.
+- **Webui:** ROMarrNG now explains release-profile, collection, plugin-source, and import findings in the selected language while preserving game titles, paths, and other provider data.
+
+#### Fixed
+
+- **Containers:** The standard `:latest`, `:main`, `:master`, and `:stable` tags now track the latest versioned release in `ghcr.io/snapetech-org/romarrng`. Browser aliases track the matching browser release. Main-branch builds keep commit-specific `sha-*` tags, and CI checks that each rolling alias matches the stable release manifest.
+- **Authentication:** Concurrent ROMarrNG OIDC attempts now use separate short-lived state cookies, and provider help links and login errors are easier to identify.
+
+#### Security
+
+- **Dependencies:** ROMarrNG now requires the patched pycryptodomex release to address a published dependency vulnerability; install this release through your normal update channel.
+
 ## [0.14.10] - 2026-10-13
 
 ### User-facing changes

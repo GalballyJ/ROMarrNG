@@ -33,6 +33,13 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "/api/v1/login": ("POST", "Exchange an API key or password for a session "
                               "cookie. Requires the TOTP code when two-factor "
                               "is enrolled."),
+    "/auth/oidc/login": ("GET", "Start the configured OIDC authorization-code "
+                                 "flow. The provider hint affects only the "
+                                 "login label and setup link."),
+    "/auth/oidc/callback": ("GET", "Complete OIDC sign-in after validating the "
+                                     "one-time browser state and provider identity."),
+    "/oidc-provider-icons.svg": ("GET", "Locally bundled OIDC provider marks "
+                                          "used on the sign-in screen."),
     "/api/v1/setup": ("POST", "First-run claim: set the admin password on an "
                               "install that has none. Open only while "
                               "unclaimed, and answers 409 once it is."),
@@ -435,8 +442,7 @@ def served_routes(source: str | None = None) -> set[str]:
 
 
 def _operation(path: str, method: str, summary: str) -> dict:
-    return {
-        method.lower(): {
+    operation = {
             "summary": summary,
             "operationId": (method.lower()
                             + re.sub(r"[^a-zA-Z0-9]+", "_", path).title()
@@ -447,6 +453,13 @@ def _operation(path: str, method: str, summary: str) -> dict:
                 "429": {"description": "Rate limited. Retry-After says when."},
             },
         }
+    if path in {
+        "/", "/api/health", "/login", "/link", "/api/v1/login",
+        "/auth/oidc/login", "/auth/oidc/callback", "/oidc-provider-icons.svg",
+    }:
+        operation["security"] = []
+    return {
+        method.lower(): operation
     }
 
 
@@ -472,7 +485,9 @@ def spec(version: str = "0.0.0", *, base_url: str = "") -> dict:
                 "The *arr for games. Request a ROM, ROMarrNG searches for it, "
                 "grabs it, verifies it against a No-Intro or Redump DAT, and "
                 "files it into your library.\n\n"
-                "Every endpoint except `/`, `/api/health` and `/api/v1/login` "
+                "Every endpoint except `/`, `/login`, `/link`, `/api/health`, "
+                "`/api/v1/login`, `/auth/oidc/login`, `/auth/oidc/callback`, "
+                "and `/oidc-provider-icons.svg` "
                 "requires a credential: `X-Api-Key`, `Authorization: Bearer`, "
                 "or `?apikey=`."
             ),

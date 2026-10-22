@@ -136,7 +136,7 @@ class Auth:
 
     # -- sessions -----------------------------------------------------------
 
-    def issue_session(self) -> str:
+    def issue_session(self, oidc_identity: dict[str, str] | None = None) -> str:
         """A signed `<expiry>.<signature>` token.
 
         Signed with the API key, so a session cannot be carried to another
@@ -144,8 +144,14 @@ class Auth:
         which is what rotating a key is for.
         """
         expires = int(time.time()) + self.session_seconds
+        claims = {"exp": expires}
+        if oidc_identity:
+            issuer = str(oidc_identity.get("iss") or "")
+            subject = str(oidc_identity.get("sub") or "")
+            if issuer and subject:
+                claims["oidc"] = {"iss": issuer, "sub": subject}
         body = base64.urlsafe_b64encode(
-            json.dumps({"exp": expires}).encode()).decode().rstrip("=")
+            json.dumps(claims, separators=(",", ":")).encode()).decode().rstrip("=")
         return f"{body}.{self._sign(body)}"
 
     def check_session(self, token: str | None) -> bool:

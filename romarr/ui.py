@@ -4776,6 +4776,12 @@ body{display:flex;align-items:center;justify-content:center;min-height:100vh;
 .err.on{display:block}
 .alt{margin-top:16px;text-align:center;font-size:12px;color:var(--dim)}
 .alt a{cursor:pointer}
+.oidc-login{display:block;margin-top:16px;padding:10px 12px;text-align:center;
+  border:1px solid var(--line);border-radius:var(--r-sm);color:var(--fg);
+  text-decoration:none;font-size:13px;font-weight:600}
+.oidc-login:hover{border-color:var(--accent-line);background:var(--bg)}
+.oidc-login{display:flex;align-items:center;justify-content:center;gap:9px}
+.oidc-provider-help{display:block;margin-top:8px;text-align:center;color:var(--dim);font-size:12px}
 .public-language{position:fixed;top:14px;inset-inline-end:14px;z-index:5;
   display:flex;align-items:center;gap:8px;padding:8px 10px;
   background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);
@@ -4814,7 +4820,9 @@ def _public_language_picker() -> str:
             'data-i18n-aria-label="Interface language"></select></div>')
 
 
-def login_page(*, claimed: bool, totp: bool = False) -> str:
+def login_page(*, claimed: bool, totp: bool = False,
+               oidc_enabled: bool = False, oidc_failed: bool = False,
+               oidc_provider: str = "generic") -> str:
     """The sign-in screen, or the first-run claim screen.
 
     Server-rendered and served unauthenticated, because the whole failure was
@@ -4822,6 +4830,25 @@ def login_page(*, claimed: bool, totp: bool = False) -> str:
     """
     if claimed:
         title, action = "Sign in", "Sign in"
+        if oidc_enabled:
+            from .oidc import oidc_provider_presentation
+            provider_label, provider_icon, provider_setup_url = (
+                oidc_provider_presentation(oidc_provider)
+            )
+            oidc_entry = (
+                '<a class="oidc-login" href="/auth/oidc/login">'
+                '<svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">'
+                f'<use href="/oidc-provider-icons.svg#oidc-{provider_icon}"></use></svg>'
+                f'Continue with {provider_label}</a>'
+                f'<a class="oidc-provider-help" href="{provider_setup_url}" '
+                f'aria-label="{provider_label} identity provider setup guide (opens in a new tab)" '
+                'target="_blank" rel="noopener noreferrer">'
+                f'Setup guide for {provider_label} <span aria-hidden="true">↗</span></a>'
+            )
+        else:
+            oidc_entry = ""
+        oidc_error = ("Single sign-on failed. Check the provider and account access, "
+                      "then try again." if oidc_failed else "")
         fields = """
   <label for="password">Password</label>
   <input id="password" type="password" autocomplete="current-password" autofocus>
@@ -4840,6 +4867,8 @@ def login_page(*, claimed: bool, totp: bool = False) -> str:
                 "environment and restart, then sign in with it.")
     else:
         title, action = "Set your password", "Create password"
+        oidc_entry = ""
+        oidc_error = ""
         fields = """
   <label for="password">New password</label>
   <input id="password" type="password" autocomplete="new-password"
@@ -4861,7 +4890,8 @@ def login_page(*, claimed: bool, totp: bool = False) -> str:
   <div class="sub" data-i18n="{title}">{title}</div>
   {fields}
   <button type="submit" id="go">{action}</button>
-  <div class="err" id="err"></div>
+  <div class="err{' on' if oidc_error else ''}" id="err" role="alert" aria-live="assertive">{oidc_error}</div>
+  {oidc_entry}
   <div class="note" data-i18n="{note}">{note}</div>
 </form>
 <script>{PUBLIC_I18N_JS}</script>

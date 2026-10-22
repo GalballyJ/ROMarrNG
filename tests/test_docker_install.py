@@ -208,7 +208,7 @@ def test_pull_request_image_validation_has_no_publish_permissions():
         assert "artifact-metadata: write" in job
 
     release_job = workflow.split("\n  release:\n", 1)[1]
-    assert "needs: [image_publish, image_browser_publish]" in release_job
+    assert "needs: [image_publish, image_browser_publish, verify-stable-image-tags]" in release_job
 
 
 def test_the_entrypoint_refuses_rather_than_letting_state_be_overwritten():
@@ -264,6 +264,19 @@ def test_the_runtime_image_can_clone_a_bundled_plugin():
     assert "command -v git" in workflow
     assert "rom-hub plugin install archive-org" in workflow, (
         "the image proves the catalogue exists but never proves a pinned plugin installs")
+
+
+def test_cffi_headers_are_available_only_during_image_builds():
+    """CFFI falls back to a source build on platforms without a matching wheel."""
+    for filename in ("Dockerfile", "Dockerfile.browser"):
+        body = (ROOT / filename).read_text(encoding="utf-8")
+        stages = re.split(r"(?m)^FROM .+$", body)
+        assert len(stages) == 3, f"{filename} should have builder and runtime stages"
+        builder, runtime = stages[1], stages[2]
+        assert "libffi-dev" in builder, (
+            f"{filename} builder cannot compile CFFI when pip has no wheel")
+        assert "libffi-dev" not in runtime, (
+            f"{filename} runtime should not contain build-only headers")
 
 
 def test_the_install_guide_exists_and_the_readme_sends_people_to_it():
