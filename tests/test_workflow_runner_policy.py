@@ -202,6 +202,17 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
 
 
 class WorkflowRunnerPolicyTests(unittest.TestCase):
+    def test_credentialed_publishers_and_release_stay_on_hosted_runners(self) -> None:
+        workflow = yaml.safe_load(
+            (WORKFLOW_DIR / "docker.yml").read_text(encoding="utf-8")
+        )
+
+        for job_name in ("image_publish", "image_browser_publish", "release"):
+            with self.subTest(job=job_name):
+                self.assertEqual(
+                    workflow["jobs"][job_name]["runs-on"], "ubuntu-latest"
+                )
+
     def test_dependency_review_runs_use_pull_request_scoped_cancellation(self) -> None:
         workflow = yaml.safe_load(
             (WORKFLOW_DIR / "dependency-review.yml").read_text(encoding="utf-8")
