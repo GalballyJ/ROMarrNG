@@ -266,6 +266,19 @@ def test_the_runtime_image_can_clone_a_bundled_plugin():
         "the image proves the catalogue exists but never proves a pinned plugin installs")
 
 
+def test_cffi_headers_are_available_only_during_image_builds():
+    """CFFI falls back to a source build on platforms without a matching wheel."""
+    for filename in ("Dockerfile", "Dockerfile.browser"):
+        body = (ROOT / filename).read_text(encoding="utf-8")
+        stages = re.split(r"(?m)^FROM .+$", body)
+        assert len(stages) == 3, f"{filename} should have builder and runtime stages"
+        builder, runtime = stages[1], stages[2]
+        assert "libffi-dev" in builder, (
+            f"{filename} builder cannot compile CFFI when pip has no wheel")
+        assert "libffi-dev" not in runtime, (
+            f"{filename} runtime should not contain build-only headers")
+
+
 def test_the_install_guide_exists_and_the_readme_sends_people_to_it():
     assert INSTALL.is_file()
     assert "docs/INSTALL.md" in README.read_text(encoding="utf-8"), (

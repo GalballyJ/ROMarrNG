@@ -9,9 +9,10 @@ FROM python:3.14-slim AS builder
 ARG TARGETARCH
 ARG PLAYWRIGHT_VERSION
 
-# pyseccomp links against libseccomp; build tools stay out of the runtime image.
+# pyseccomp links against libseccomp; CFFI also needs libffi headers when pip
+# builds from source. Build tools and headers stay out of the runtime image.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential libseccomp-dev \
+ && apt-get install -y --no-install-recommends build-essential libseccomp-dev libffi-dev \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
