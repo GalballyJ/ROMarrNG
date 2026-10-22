@@ -297,5 +297,8 @@ def test_public_test_job_uses_github_hosted_runner():
     test_job = workflow.split("  test:\n", 1)[1].split(
         "\n  validation-environment-portability:", 1
     )[0]
-    assert re.search(r"(?m)^    runs-on: ubuntu-latest$", test_job)
-    assert "runs-on: ${{" not in test_job
+    # Main-branch trusted builds may use the isolated JIT group. Pull requests,
+    # tags, and other refs must resolve to GitHub-hosted runners.
+    assert re.search(r"(?m)^    runs-on:.*ubuntu-latest.*$", test_job)
+    assert "github.event_name == 'push'" in test_job
+    assert "github.ref == 'refs/heads/main'" in test_job

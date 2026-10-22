@@ -44,7 +44,10 @@ from urllib.parse import unquote, urlsplit
 from urllib.robotparser import RobotFileParser
 
 import requests
-from defusedxml.xmlrpc import monkey_patch as _harden_xmlrpc
+from defusedxml.xmlrpc import (
+    monkey_patch as _harden_xmlrpc,
+    xmlrpc_client as _safe_xmlrpc_client,
+)
 
 log = logging.getLogger(__name__)
 
@@ -638,10 +641,9 @@ class Rtorrent:
 
     def _server(self):
         if self._proxy is None:
-            # The module-level defusedxml monkey patch runs before this import.
-            import xmlrpc.client  # nosemgrep: python.lang.security.use-defused-xmlrpc.use-defused-xmlrpc -- defusedxml.xmlrpc.monkey_patch hardens this stdlib module at import time.
-            self._proxy = xmlrpc.client.ServerProxy(
-                self._config.base_url, allow_none=True)  # nosemgrep: python.lang.security.use-defused-xmlrpc.use-defused-xmlrpc
+            # defusedxml has already replaced the parser and gzip decoder.
+            self._proxy = _safe_xmlrpc_client.ServerProxy(
+                self._config.base_url, allow_none=True)
         return self._proxy
 
     def reachable(self) -> bool:

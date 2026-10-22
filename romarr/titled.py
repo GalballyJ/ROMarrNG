@@ -50,10 +50,11 @@ import logging
 import os
 import re
 import time
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -144,13 +145,15 @@ def _fetch_json(url: str, timeout: int = FETCH_TIMEOUT):
     """GET a JSON document, or None. Network failure is never an exception
     here: TitleDB being down is an operational fact, not a bug in ROMarr."""
     try:
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "romarr", "Accept": "application/json"})
         # TITLED_RAW is a fixed upstream catalogue host; region/version affect
         # only its path and cannot choose a destination server.
-        with urllib.request.urlopen(req, timeout=timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            return json.loads(response.read().decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001 - every failure mode is "no data"
+        response = requests.get(
+            url, headers={"User-Agent": "romarr", "Accept": "application/json"},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response.json()
+    except (requests.RequestException, ValueError) as exc:
         # Do not include the request URL or exception payload in logs; source
         # URLs can include provider credentials or user search data.
         log.warning("TitleDB fetch failed: %s", exc.__class__.__name__)

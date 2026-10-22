@@ -114,13 +114,14 @@ def test_a_blank_browser_host_means_launch_one_here():
 
 
 def test_the_endpoint_scheme_decides_how_the_file_gets_back():
-    """Not cosmetic. A `ws://` playwright run-server runs the driver on the
+    """Not cosmetic. A `wss://` playwright run-server runs the driver on the
     browser's host and streams the finished file back; a bare `http://`
     debugging port has the driver here, so the browser saves onto its own
-    disk and only a shared directory can recover it."""
+    disk and only a shared directory can recover it. Remote endpoints default
+    to TLS; cleartext is an explicit operator choice."""
     ws = build_client({"type": "browser", "save_path": "/d",
                        "host": "10.0.0.5", "port": 3000})
-    assert ws._config.base_url == "ws://10.0.0.5:3000"
+    assert ws._config.base_url == "wss://10.0.0.5:3000"
     cdp = build_client({"type": "browser", "save_path": "/d",
                         "host": "10.0.0.5", "port": 9222, "scheme": "http"})
     assert cdp._config.base_url == "http://10.0.0.5:9222"
@@ -477,10 +478,11 @@ def _code_only(path: pathlib.Path) -> str:
 
 @pytest.mark.parametrize("module", ["browser", "downloaders"])
 def test_neither_half_of_the_backend_contains_evasion_machinery(module):
-    import importlib
+    from romarr import browser, downloaders
 
+    modules = {"browser": browser, "downloaders": downloaders}
     code = _code_only(pathlib.Path(
-        importlib.import_module(f"romarr.{module}").__file__))
+        modules[module].__file__))
     for token in EVASION:
         assert token not in code, token
 
