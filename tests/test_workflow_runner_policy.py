@@ -136,7 +136,7 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
                 "public workflows must use hosted runners except for the exact trusted-main or external-fork JIT job"
             )
 
-    if runner_count == 0:
+    if runner_count == 0 and not violations:
         violations.append("no checked-in workflow runner assignments were found")
     return violations
 
@@ -209,6 +209,21 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
 
         self.assertEqual(len(violations), 1)
         self.assertIn("reusable workflow runner is not visible", violations[0])
+
+    def test_workflow_without_runner_assignments_keeps_the_catch_all_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workflow_dir = Path(temporary_directory)
+            (workflow_dir / "empty-jobs.yml").write_text(
+                "jobs: {}\n",
+                encoding="utf-8",
+            )
+
+            violations = _runner_policy_violations(workflow_dir)
+
+        self.assertEqual(
+            violations,
+            ["no checked-in workflow runner assignments were found"],
+        )
 
     def test_quoted_runner_key_in_yaml_file_is_checked(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
