@@ -1654,9 +1654,9 @@ class MoonlightHost:
         try:
             # Moonlight requires its uncredentialed /serverinfo probe on the
             # documented plain-HTTP port; this sends no secret or user data.
-            response = requests.get(  # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http
-                url, timeout=self.timeout, allow_redirects=False,  # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http
-            )
+            # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http -- Required by the local Sunshine/Moonlight serverinfo protocol; the request carries no credentials or user data.
+            response = requests.get(url, timeout=self.timeout,
+                                    allow_redirects=False)
             response.raise_for_status()
             body = response.text
         except Exception as exc:                # a host being off is normal
@@ -2055,7 +2055,8 @@ def _sunshine_json_request(
             f"could not load Sunshine TLS trust configuration ({type(err).__name__})") from err
 
     # A verified CA or explicit certificate fingerprint is required above.
-    connection = http.client.HTTPSConnection(  # nosemgrep: python.lang.security.audit.httpsconnection-detected.httpsconnection-detected
+    # nosemgrep: python.lang.security.audit.httpsconnection-detected.httpsconnection-detected -- TLS context verifies a trusted CA or pinned fingerprint before credentials are sent.
+    connection = http.client.HTTPSConnection(
         host, port=port, timeout=timeout, context=context)
     try:
         connection.connect()

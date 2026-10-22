@@ -292,15 +292,16 @@ def amazon_games(database: Path) -> list[LocalGame]:
             try:
                 # Table names come from sqlite_master, but are still quoted
                 # with embedded double quotes escaped before use as identifiers.
-                columns = [
-                    c[1] for c in connection.execute(  # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- SQLite PRAGMA metadata uses a quoted and escaped identifier.
-                        f'PRAGMA table_info({_quote_sqlite_identifier(table)})'  # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
-                    )
-                ]
+                # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- SQLite PRAGMA metadata uses a quoted and escaped identifier.
+                table_info = connection.execute(
+                    f'PRAGMA table_info({_quote_sqlite_identifier(table)})')
+                columns = [column[1] for column in table_info]
                 if "ProductTitle" not in columns:
                     continue
-                for (name,) in connection.execute(  # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- Reads local SQLite schema using a quoted and escaped identifier.
-                        f'SELECT ProductTitle FROM {_quote_sqlite_identifier(table)}'):  # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+                # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- Reads local SQLite schema using a quoted and escaped identifier.
+                rows = connection.execute(
+                    f'SELECT ProductTitle FROM {_quote_sqlite_identifier(table)}')
+                for (name,) in rows:
                     text = str(name or "").strip()
                     if text:
                         names.append(text)

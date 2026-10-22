@@ -484,7 +484,8 @@ def apply_patch(rom: bytes, patch: bytes, version: dict | None = None) -> tuple[
     if fmt == "ips":
         base = (version or {}).get("base") or {}
         # Patch manifests use SHA-1 as a legacy game-file identity field.
-        if base.get("sha1") and hashlib.sha1(rom, usedforsecurity=False).hexdigest() != base["sha1"]:  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+        # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1 -- Legacy patch manifests require SHA-1 for ROM identity, not authenticity.
+        if base.get("sha1") and hashlib.sha1(rom, usedforsecurity=False).hexdigest() != base["sha1"]:
             raise PatchError("This is not the game dump the patch was made for.", "BASE_MISMATCH")
         if base.get("crc32") and f"{_crc(rom):08x}" != base["crc32"]:
             raise PatchError("This is not the game dump the patch was made for.", "BASE_MISMATCH")
@@ -531,6 +532,8 @@ def prepare_patched_file(
     temporary = target.with_suffix(target.suffix + ".part")
     temporary.write_bytes(patched)
     temporary.replace(target)
+    # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1 -- The returned value is a legacy ROM identity checksum, not an authentication or security decision.
+    legacy_sha1 = hashlib.sha1(patched, usedforsecurity=False).hexdigest()
     return Prepared(target, fmt, verified=fmt != "ips" or bool(
         version.get("base", {}).get("sha1") or version.get("base", {}).get("crc32")),
-        sha1=hashlib.sha1(patched, usedforsecurity=False).hexdigest())  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+        sha1=legacy_sha1)

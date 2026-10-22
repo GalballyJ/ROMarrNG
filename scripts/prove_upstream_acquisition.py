@@ -276,7 +276,8 @@ urllib.request.urlopen(
                               "save_path": str(root / "downloads"), "name": "Proof Hub"})
         service.reload_clients()
         # DAT's schema requires SHA-1 as a non-security ROM identity checksum.
-        digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+        # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1 -- This fixture reproduces the DAT format's legacy SHA-1 ROM identity field.
+        digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()
         service.dats.add(parse_dat(f'''<datafile><header><name>Nintendo - Super Nintendo Entertainment System</name></header>
 <game name="Proof Game (USA)"><rom name="Proof Game (USA).sfc" size="{len(payload)}" sha1="{digest}"/></game>
 <game name="Excluded Game (Japan)"/></datafile>'''))
@@ -284,9 +285,10 @@ urllib.request.urlopen(
         threading.Thread(target=api.serve_forever, daemon=True).start()
         def call(path, body=None, raw=False):
             # The ephemeral test API binds only to 127.0.0.1 on a random port.
-            with http.client.HTTPConnection(
+            connection = http.client.HTTPConnection(
                 "127.0.0.1", api.server_port, timeout=30,
-            ) as connection:
+            )
+            try:
                 connection.request(
                     "POST" if body is not None else "GET",
                     f"/api/integration/seerrng/v1{path}",
@@ -300,6 +302,8 @@ urllib.request.urlopen(
                     raise RuntimeError(
                         f"local proof API returned HTTP {response.status}")
                 return data if raw else json.loads(data)
+            finally:
+                connection.close()
         try:
             [game] = call("/catalog/dat/browse-page?platformSlugs=snes")["results"]
             assert game["title"] == "Proof Game"

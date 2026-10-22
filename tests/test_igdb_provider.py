@@ -14,10 +14,9 @@ placeholders and the network is never touched.
 
 from __future__ import annotations
 
-import io
 import json
 import urllib.error
-import urllib.request
+from urllib.parse import parse_qs, urlencode
 
 import pytest
 
@@ -27,19 +26,18 @@ IGDB = {"type": "igdb", "client_id": "cid", "token": "sec", "enable": True}
 
 
 class Reply:
-    """The two things `urlopen`'s result is used for."""
+    """The requests response fields used by the IGDB provider."""
 
-    def __init__(self, payload):
-        self._body = json.dumps(payload).encode()
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
 
-    def read(self):
-        return self._body
+    def json(self):
+        return self._payload
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise m.requests.HTTPError(f"HTTP {self.status_code}")
 
 
 @pytest.fixture
@@ -58,29 +56,33 @@ def igdb(monkeypatch):
     state = {"token": {"access_token": "bearer-1", "expires_in": 5184000},
              "rows": [], "fail": None}
 
-    def fake_urlopen(request, timeout=None):
-        url = request.full_url
-        body = (request.data or b"").decode()
+    def fake_post(url, *, data=None, headers=None, timeout=None,
+                  allow_redirects=True, **kwargs):
+        if isinstance(data, dict):
+            body = urlencode(data)
+        elif isinstance(data, bytes):
+            body = data.decode()
+        else:
+            body = data or ""
         calls.append({"url": url, "body": body,
-                      "headers": dict(request.headers)})
+                      "headers": dict(headers or {})})
         if url.startswith(m.IGDB_TOKEN_URL):
             if isinstance(state["token"], Exception):
                 raise state["token"]
             return Reply(state["token"])
         if state["fail"] is not None:
             failure, state["fail"] = state["fail"], None
-            raise failure
+            return failure
         rows = state["rows"]
         return Reply(rows.pop(0) if isinstance(rows, list) and rows
                      and isinstance(rows[0], list) else rows)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(m.requests, "post", fake_post)
     return type("Fake", (), {"calls": calls, "state": state})()
 
 
 def http_error(code):
-    return urllib.error.HTTPError("https://api.igdb.com/v4/games", code,
-                                  "no", {}, io.BytesIO(b""))
+    return Reply([], status_code=code)
 
 
 def api_calls(igdb):
@@ -128,9 +130,13 @@ def test_the_token_is_exchanged_once_and_reused(igdb):
 def test_the_exchange_is_client_credentials(igdb):
     igdb.state["rows"] = []
     m.igdb_query(IGDB, "games", "fields name;")
-    exchange = igdb.calls[0]["url"]
-    assert "grant_type=client_credentials" in exchange
-    assert "client_id=cid" in exchange
+    exchange = igdb.calls[0]
+    assert exchange["url"] == m.IGDB_TOKEN_URL
+    assert "client_secret" not in exchange["url"]
+    assert parse_qs(exchange["body"]) == {
+        "client_id": ["cid"], "client_secret": ["sec"],
+        "grant_type": ["client_credentials"],
+    }
 
 
 def test_an_expired_token_is_refreshed_once_and_the_query_retried(igdb):
@@ -147,13 +153,13 @@ def test_an_expired_token_is_refreshed_once_and_the_query_retried(igdb):
 def test_a_second_401_is_a_failure_rather_than_a_loop(igdb, monkeypatch):
     seen = []
 
-    def always_401(request, timeout=None):
-        if request.full_url.startswith(m.IGDB_TOKEN_URL):
+    def always_401(url, **kwargs):
+        if url.startswith(m.IGDB_TOKEN_URL):
             return Reply({"access_token": "b", "expires_in": 100})
         seen.append(1)
-        raise http_error(401)
+        return http_error(401)
 
-    monkeypatch.setattr(urllib.request, "urlopen", always_401)
+    monkeypatch.setattr(m.requests, "post", always_401)
     assert m.igdb_query(IGDB, "games", "fields name;") == []
     assert len(seen) == 2
 

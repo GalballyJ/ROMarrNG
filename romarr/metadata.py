@@ -285,8 +285,8 @@ def _igdb_bearer(client_id: str, secret: str, *, refresh: bool = False) -> str:
             return cached[0]
     response = requests.post(
         IGDB_TOKEN_URL,
-        params={"client_id": client_id, "client_secret": secret,
-                "grant_type": "client_credentials"},
+        data={"client_id": client_id, "client_secret": secret,
+              "grant_type": "client_credentials"},
         timeout=TIMEOUT,
         allow_redirects=False,
     )
@@ -321,8 +321,9 @@ def igdb_query(cfg: dict, endpoint: str, body: str, *, strict: bool = False) -> 
         # in this field, because that is what the help text asked for. The
         # exchange failing is the signal; try the stored value verbatim
         # rather than telling somebody their working setup is broken.
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure -- Only the exception class is logged; credentials and response text are excluded.
         log.debug("IGDB authentication exchange failed (%s); retaining configured value",
-                  exc.__class__.__name__)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
+                  exc.__class__.__name__)
         bearer = secret
     if not bearer:
         if strict:
