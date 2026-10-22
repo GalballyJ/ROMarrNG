@@ -38,7 +38,7 @@ PUBLIC_FORK_CALLER_CONDITION = (
 )
 PUBLIC_FORK_CALLER_USES = (
     "snapetech-org/ROMarrNG/.github/workflows/fork-safe-validation.yml"
-    "@5e8027f52c89f8089d13b97c5cd54a10998134ad"
+    "@0fd03194a4a067bb3c35e44afbdc8ad80ae497aa"
 )
 
 
