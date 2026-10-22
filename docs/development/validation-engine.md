@@ -42,18 +42,20 @@ planning imports candidate validation configuration.
 GitHub Actions remains responsible for receipt-backed validation.
 
 In CI, `--plan` discovers files and required commands without installing
-packages or running pytest. All workflow events use GitHub-hosted runners. The
-Linux validation job uses `setup-python` with Python 3.13 and creates its
-private workspace beneath `RUNNER_TEMP`. The engine installs repository
-requirements, pytest, and test-only PyYAML in a disposable task environment
-before running the native suite. It divides discovered test files into four
-disjoint inventory shards and runs at most two shards at once after dependency
-installation. Each shard has its own environment and log and disables pytest's
-shared cache plugin. The shards use `pytest.ini` as configured, including its
-default `not network` marker, so tests that reach the public internet remain
-deselected. The engine counts passed, skipped, failed, and deselected cases
-from every shard, records the file inventory in one receipt, and does not call
-an empty run successful.
+packages or running pytest. Pull requests and other untrusted refs use
+GitHub-hosted runners. Trusted `main` workflows can use the restricted
+organization JIT pool with exact repository, workflow, ref, and per-run
+labels. The Linux validation job uses `setup-python` with Python 3.13 and
+creates its private workspace beneath `RUNNER_TEMP`. The engine installs
+repository requirements, pytest, and test-only PyYAML in a disposable task
+environment before running the native suite. It divides discovered test files
+into four disjoint inventory shards and runs at most two shards at once after
+dependency installation. Each shard has its own environment and log and
+disables pytest's shared cache plugin. The shards use `pytest.ini` as
+configured, including its default `not network` marker, so tests that reach the
+public internet remain deselected. The engine counts passed, skipped, failed,
+and deselected cases from every shard, records the file inventory in one
+receipt, and does not call an empty run successful.
 
 The workflow sets `TMPDIR` to `RUNNER_TEMP` for the validation process so its
 receipt-verified evidence directory stays beneath the same private root used
@@ -84,7 +86,10 @@ launcher masks host paths.
 
 Runtime probes and child commands receive only an inherited allowlist for
 executable paths, platform process variables, locale, and timezone, plus child
-tasks' declared settings. Proxy, private-index, and custom CA settings are
+tasks' declared settings. On Linux, `LD_LIBRARY_PATH` is preserved only when
+it names exactly the Python tool's `lib` directory under `RUNNER_TOOL_CACHE`;
+this lets the relocatable `setup-python` interpreter run without accepting an
+ambient library search path. Proxy, private-index, and custom CA settings are
 passed only to the dependency-install task; pytest never receives them. Each
 task uses run-owned home, temporary, XDG, and pip cache directories, and Python
 user-site packages are disabled. Test children receive `CI=true`; ambient

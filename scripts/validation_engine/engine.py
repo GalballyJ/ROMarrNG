@@ -172,6 +172,48 @@ def inherited_toolchain_environment(inherited: dict[str, str] | None = None) -> 
             continue
         if normalized not in values or key == normalized:
             values[normalized] = value
+
+    # setup-python's relocatable Linux interpreter needs this one library
+    # directory. Keep it only when it is exactly the selected Python tool's
+    # lib directory beneath the runner's tool cache; never inherit arbitrary
+    # loader search paths from the ambient environment.
+    if os.name != "nt":
+        python_root = next(
+            (value for key, value in source.items() if key.upper() == "PYTHON_ROOT_DIR"),
+            None,
+        )
+        runner_tool_cache = next(
+            (value for key, value in source.items() if key.upper() == "RUNNER_TOOL_CACHE"),
+            None,
+        )
+        loader_path = next(
+            (value for key, value in source.items() if key.upper() == "LD_LIBRARY_PATH"),
+            None,
+        )
+        if (
+            isinstance(python_root, str)
+            and python_root
+            and isinstance(runner_tool_cache, str)
+            and runner_tool_cache
+            and isinstance(loader_path, str)
+            and loader_path
+        ):
+            try:
+                tool_cache_path = Path(runner_tool_cache).resolve(strict=True)
+                python_root_path = Path(python_root).resolve(strict=True)
+                python_library_path = (python_root_path / "lib").resolve(strict=True)
+                raw_paths = loader_path.split(os.pathsep)
+                requested_paths = [Path(value).resolve(strict=True) for value in raw_paths]
+            except (OSError, RuntimeError, ValueError):
+                pass
+            else:
+                if (
+                    all(raw_paths)
+                    and python_root_path.is_relative_to(tool_cache_path)
+                    and python_library_path.is_dir()
+                    and requested_paths == [python_library_path]
+                ):
+                    values["LD_LIBRARY_PATH"] = str(python_library_path)
     return values
 
 
