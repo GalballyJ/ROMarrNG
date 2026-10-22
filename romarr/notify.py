@@ -28,10 +28,10 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -76,24 +76,36 @@ def _post(url: str, *, data: bytes | None = None, headers: dict | None = None,
           method: str = "POST") -> bool:
     _last.reason = ""
     try:
-        request = urllib.request.Request(url, data=data, method=method)
-        for name, value in (headers or {}).items():
-            request.add_header(name, value)
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            if 200 <= response.status < 300:
-                return True
-            _last.reason = f"the endpoint answered HTTP {response.status}"
-    except urllib.error.HTTPError as exc:
-        _last.reason = f"the endpoint answered HTTP {exc.code}"
+        parts = urllib.parse.urlsplit(str(url or ""))
+        if (parts.scheme not in {"http", "https"} or not parts.hostname
+                or parts.username or parts.password):
+            _last.reason = "not a usable HTTP endpoint"
+            log.warning("notification not sent: %s", _last.reason)
+            return False
+        # requests does not support file:// handlers; the endpoint is admin
+        # configuration and logs redact its secret path.
+        response = requests.request(
+            method, url, data=data, headers=headers or {}, timeout=TIMEOUT,
+            allow_redirects=False,
+        )
+        if 200 <= response.status_code < 300:
+            return True
+        _last.reason = f"the endpoint answered HTTP {response.status_code}"
         log.warning("notification to %s rejected: HTTP %s",
-                    _safe(url), exc.code)
+                    _safe(url), response.status_code)
     except ValueError as exc:
         _last.reason = f"not a usable URL ({exc.__class__.__name__})"
         log.warning("notification not sent: %s", _last.reason)
+    except requests.RequestException as exc:
+        _last.reason = ("could not reach the endpoint "
+                        f"({exc.__class__.__name__})")
+        log.warning("notification to %s failed: %s", _safe(url),
+                    exc.__class__.__name__)
     except Exception as exc:                    # a down endpoint is routine
         _last.reason = ("could not reach the endpoint "
                         f"({exc.__class__.__name__})")
-        log.warning("notification to %s failed: %s", _safe(url), exc)
+        log.warning("notification to %s failed: %s", _safe(url),
+                    exc.__class__.__name__)
     return False
 
 

@@ -18,10 +18,11 @@ import argparse
 import getpass
 import json
 import sys
-import urllib.error
-import urllib.request
 from collections import Counter
 from pathlib import Path
+from urllib.parse import urlsplit
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -71,18 +72,29 @@ def main() -> int:
         "content": content,
         "enable": True,
     }).encode()
-    request = urllib.request.Request(
-        args.url.rstrip("/") + "/api/v1/importlist", data=payload,
-        headers={"Content-Type": "application/json", "X-Api-Key": key},
-        method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            saved = json.loads(response.read() or b"{}")
-    except urllib.error.HTTPError as exc:
-        print(f"\nROMarr refused the list: HTTP {exc.code}", file=sys.stderr)
+    parts = urlsplit(args.url)
+    if (parts.scheme not in {"http", "https"} or not parts.hostname
+            or parts.username or parts.password):
+        print("\nROMarr URL must be an HTTP(S) endpoint without URL credentials.",
+              file=sys.stderr)
         return 1
-    except Exception as exc:                # noqa: BLE001
-        print(f"\nCould not reach ROMarr at {args.url}: "
+    try:
+        # This operator-invoked utility posts only to the destination supplied
+        # on its command line; requests supports HTTP(S) only.
+        response = requests.post(
+            args.url.rstrip("/") + "/api/v1/importlist",
+            data=payload,
+            headers={"Content-Type": "application/json", "X-Api-Key": key},
+            timeout=60,
+            allow_redirects=False,
+        )
+        if response.status_code >= 300:
+            print(f"\nROMarr refused the list: HTTP {response.status_code}",
+                  file=sys.stderr)
+            return 1
+        saved = response.json() if response.content else {}
+    except (requests.RequestException, ValueError) as exc:
+        print(f"\nCould not reach ROMarr at {parts.hostname}: "
               f"{exc.__class__.__name__}", file=sys.stderr)
         return 1
 

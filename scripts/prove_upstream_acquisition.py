@@ -7,16 +7,23 @@ Uses only generated fixture bytes and loopback HTTPS; no external ROM source.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import stat
 import ssl
+from datetime import datetime, timedelta, timezone
+from ipaddress import IPv4Address
 from pathlib import Path
 import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.request import Request, urlopen
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 
 def main():
@@ -49,11 +56,42 @@ def main():
             def log_message(self, *args):
                 pass
         source = ThreadingHTTPServer(("127.0.0.1", 0), Source)
-        fixtures = Path(__file__).parent / "fixtures"
-        cert = fixtures / "hub-proof.crt"
+        cert = root / "hub-proof.crt"
+        key = root / "hub-proof.key"
+        private_key = rsa.generate_private_key(public_exponent=65537,
+                                               key_size=2048)
+        subject = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1"),
+        ])
+        now = datetime.now(timezone.utc)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(subject)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1))
+            .not_valid_after(now + timedelta(days=1))
+            .add_extension(
+                x509.SubjectAlternativeName([
+                    x509.IPAddress(IPv4Address("127.0.0.1")),
+                ]),
+                critical=False,
+            )
+            .sign(private_key, hashes.SHA256())
+        )
+        key_bytes = private_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+        key_fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(key_fd, "wb") as key_file:
+            key_file.write(key_bytes)
+        cert.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.load_cert_chain(cert, fixtures / "hub-proof.key")
+        context.load_cert_chain(cert, key)
         source.socket = context.wrap_socket(source.socket, server_side=True)
         os.environ["SSL_CERT_FILE"] = str(cert)
         threading.Thread(target=source.serve_forever, daemon=True).start()
@@ -237,20 +275,35 @@ urllib.request.urlopen(
         service.store.put_item("download_clients", {"type": "hub", "enable": True,
                               "save_path": str(root / "downloads"), "name": "Proof Hub"})
         service.reload_clients()
-        digest = hashlib.sha1(payload).hexdigest()
+        # DAT's schema requires SHA-1 as a non-security ROM identity checksum.
+        # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1 -- This fixture reproduces the DAT format's legacy SHA-1 ROM identity field.
+        digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()
         service.dats.add(parse_dat(f'''<datafile><header><name>Nintendo - Super Nintendo Entertainment System</name></header>
 <game name="Proof Game (USA)"><rom name="Proof Game (USA).sfc" size="{len(payload)}" sha1="{digest}"/></game>
 <game name="Excluded Game (Japan)"/></datafile>'''))
         api = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
         threading.Thread(target=api.serve_forever, daemon=True).start()
-        base = f"http://127.0.0.1:{api.server_port}/api/integration/seerrng/v1"
         def call(path, body=None, raw=False):
-            req = Request(base + path, data=json.dumps(body).encode() if body is not None else None,
-                          headers={"X-Api-Key": service.auth.integration_key,
-                                   "Content-Type": "application/json"})
-            with urlopen(req, timeout=30) as response:
+            # The ephemeral test API binds only to 127.0.0.1 on a random port.
+            connection = http.client.HTTPConnection(
+                "127.0.0.1", api.server_port, timeout=30,
+            )
+            try:
+                connection.request(
+                    "POST" if body is not None else "GET",
+                    f"/api/integration/seerrng/v1{path}",
+                    body=json.dumps(body).encode() if body is not None else None,
+                    headers={"X-Api-Key": service.auth.integration_key,
+                             "Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
                 data = response.read()
+                if response.status >= 400:
+                    raise RuntimeError(
+                        f"local proof API returned HTTP {response.status}")
                 return data if raw else json.loads(data)
+            finally:
+                connection.close()
         try:
             [game] = call("/catalog/dat/browse-page?platformSlugs=snes")["results"]
             assert game["title"] == "Proof Game"

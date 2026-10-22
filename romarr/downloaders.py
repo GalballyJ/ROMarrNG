@@ -44,8 +44,17 @@ from urllib.parse import unquote, urlsplit
 from urllib.robotparser import RobotFileParser
 
 import requests
+from defusedxml.xmlrpc import (
+    monkey_patch as _harden_xmlrpc,
+    xmlrpc_client as _safe_xmlrpc_client,
+)
 
 log = logging.getLogger(__name__)
+
+# rTorrent replies are XML from a configured remote service. Harden the
+# stdlib XML-RPC parser against entity expansion and oversized compressed
+# responses before constructing any ServerProxy instances.
+_harden_xmlrpc()
 
 
 @dataclass(frozen=True)
@@ -632,8 +641,8 @@ class Rtorrent:
 
     def _server(self):
         if self._proxy is None:
-            import xmlrpc.client
-            self._proxy = xmlrpc.client.ServerProxy(
+            # defusedxml has already replaced the parser and gzip decoder.
+            self._proxy = _safe_xmlrpc_client.ServerProxy(
                 self._config.base_url, allow_none=True)
         return self._proxy
 
@@ -733,11 +742,12 @@ class SynologyDownloadStation:
             }, timeout=self._config.timeout)
             body = response.json()
         except (requests.RequestException, ValueError) as err:
-            log.warning("Download Station login failed: %s", err.__class__.__name__)
+            # Do not log the URL, credentials, or request/response body.
+            log.warning("Download Station login failed: %s", err.__class__.__name__)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             return False
         self._sid = ((body.get("data") or {}).get("sid") or "") if body.get("success") else ""
         if not self._sid:
-            log.warning("Download Station rejected the credentials (code %s)",
+            log.warning("Download Station returned an authentication error (code %s)",
                         (body.get("error") or {}).get("code"))
         return bool(self._sid)
 
@@ -945,8 +955,9 @@ class Flood:
                 timeout=self._config.timeout)
             response.raise_for_status()
         except requests.RequestException as err:
-            log.warning("flood rejected the credentials: %s",
-                        err.__class__.__name__)
+            # Log only the exception type; the response may contain auth data.
+            log.warning("Flood authentication response failed: %s",
+                        err.__class__.__name__)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             self._authed = False
             return False
         self._authed = True
@@ -1076,11 +1087,12 @@ class FreeboxDownload:
                 json={"app_id": self._config.app_id, "password": password},
                 timeout=self._config.timeout).json()
         except (requests.RequestException, ValueError, AttributeError) as err:
-            log.warning("freebox login failed: %s", err.__class__.__name__)
+            # Log only the exception type; the response may contain auth data.
+            log.warning("freebox login failed: %s", err.__class__.__name__)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             return False
         self._token = str((body.get("result") or {}).get("session_token") or "")
         if not self._token:
-            log.warning("freebox refused the app token (%s)",
+            log.warning("Freebox returned an authentication error (%s)",
                         body.get("error_code"))
         return bool(self._token)
 
@@ -1325,8 +1337,9 @@ class UTorrent:
                                          timeout=self._config.timeout)
             response.raise_for_status()
         except requests.RequestException as err:
-            log.warning("utorrent would not issue a token: %s",
-                        err.__class__.__name__)
+            # The token page's contents and URL can carry credentials; log no payload.
+            log.warning("uTorrent request failed: %s",
+                        err.__class__.__name__)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             return False
         found = self._TOKEN.search(response.text or "")
         self._token = found.group(1).strip() if found else ""
@@ -2662,15 +2675,15 @@ class SitePolicy:
 class SiteConfig:
     save_path: str
     mode: str = "direct"              # "direct" | "browser"
-    #: A browser running somewhere else: `ws://` for a playwright run-server,
-    #: `http://` for a bare debugging port. Empty means launch one here. Named
+    #: A browser running somewhere else: `wss://` for a playwright run-server,
+    #: `https://` for a bare debugging port behind a TLS proxy. Empty means launch one here. Named
     #: base_url because that is the field every other client in this module
     #: carries and the status row reads by that name.
     base_url: str = ""
-    #: Where an `http://` browser writes its downloads, as it sees the path.
+    #: Where a remote browser writes its downloads, as it sees the path.
     #: Needed only for that one shape, and only when the two hosts share a
-    #: directory -- see browser._keep, which explains why ws:// does not need
-    #: it and http:// cannot do without it.
+    #: directory -- see browser._keep, which explains why the secure
+    #: Playwright protocol does not need it and remote CDP does.
     remote_download_dir: str = ""
     user_agent: str = SITE_USER_AGENT
     delay: float = SITE_DELAY
@@ -3743,17 +3756,22 @@ CLIENT_TYPES = {
             FIELD("host", "Browser Host",
                   help="Blank launches Chromium here when installed. In "
                        "Docker or Unraid, use the ROMarrNG browser image and "
-                       "a matching Playwright run-server; enter that server's "
-                       "address, set Browser Port to 3000 and Scheme to ws. "
+                       "a matching Playwright run-server; enter its TLS "
+                       "address, set Browser Port to 3000 and Scheme to wss. "
+                       "For an isolated trusted LAN without TLS, set "
+                       "ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS=true. "
                        "The driver streams the finished file back, so the "
                        "containers need no shared download directory."),
             FIELD("port", "Browser Port", "int", 3000),
-            FIELD("scheme", "Scheme", default="ws",
-                  help="ws for a playwright run-server; http for a bare "
-                       "`chromium --remote-debugging-port`, which can only "
-                       "hand the file over through a shared directory."),
+            FIELD("scheme", "Scheme", default="wss",
+                  help="wss for a TLS-protected playwright run-server; https "
+                       "for a TLS proxy to `chromium --remote-debugging-port`, "
+                       "which can only "
+                       "hand the file over through a shared directory. "
+                       "Unencrypted remote endpoints need "
+                       "ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS=true."),
             FIELD("remote_download_dir", "Browser's Download Directory",
-                  help="Only for an http endpoint, and only when both "
+                  help="Only for a remote CDP endpoint, and only when both "
                        "containers can see the same directory. Translated "
                        "with the remote path mappings."),
             FIELD("delay", "Seconds between requests", "int", 5),
@@ -3896,7 +3914,7 @@ def build_client(cfg: dict):
             save_path=cfg.get("save_path", "")))
     elif kind in ("direct", "browser"):
         # A blank host means "launch one here", so an unset host must not be
-        # assembled into `ws://localhost:3000` -- that would point the driver
+        # assembled into a remote browser endpoint -- that would point the driver
         # at a machine nobody configured and fail as a connection refused
         # rather than as the local launch that was asked for.
         endpoint = ""
@@ -3904,7 +3922,7 @@ def build_client(cfg: dict):
             # base_url_for only speaks http and https; the scheme decides how
             # the finished file gets back here, so it is a field of its own
             # rather than a guess from the port number.
-            scheme = str(cfg.get("scheme") or "ws").strip().lower()
+            scheme = str(cfg.get("scheme") or "wss").strip().lower()
             endpoint = re.sub(r"^https?://", f"{scheme}://", url, count=1)
         client = SiteDownloader(SiteConfig(
             save_path=cfg.get("save_path", ""),

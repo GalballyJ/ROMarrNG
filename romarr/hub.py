@@ -273,7 +273,7 @@ def _plugin_runtime_context(process) -> dict:
     from .plugin_runtime.scratch import tmpfs_root
     scratch = Path(tempfile.mkdtemp(
         prefix="romarr-hub-plugin-", dir=str(tmpfs_root()))).resolve()
-    os.chmod(scratch, 0o700)
+    # tempfile.mkdtemp creates this private to the owning process user (0700).
     child_env = {
         "HOME": str(scratch),
         "TMPDIR": str(scratch),

@@ -355,6 +355,8 @@ class OIDCAuth:
             claims.validate(leeway=60)
             payload = dict(claims)
         except Exception as error:
+            # Token contents and claims are intentionally excluded from logs.
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure -- Only the exception type is logged; token contents and claims are excluded.
             log.debug("OIDC ID token validation failed (%s)", type(error).__name__)
             raise OIDCAuthError("invalid_id_token") from None
 

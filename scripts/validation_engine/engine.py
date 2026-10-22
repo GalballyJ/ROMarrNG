@@ -971,8 +971,8 @@ def execute(root: Path, plan: dict[str, Any], on_progress: Any = None) -> tuple[
     if plan["executionContext"].get("executor") == "github-actions" and github.get("sha") != plan["candidate"]["commit"]:
         missing.append({"command": "GITHUB_SHA", "available": False, "expected": plan["candidate"]["commit"], "actual": github.get("sha")})
     run_root = Path(tempfile.mkdtemp(prefix=config.REPOSITORY + "-validation-"))
-    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- private validation outputs must be owner-only
-    os.chmod(run_root, 0o700)
+    # tempfile.mkdtemp creates this owner-only directory (0700); receipts and
+    # logs can contain local paths and diagnostics.
     run_id = str(uuid.uuid4())
     started_at = utc_now()
     by_id: dict[str, dict[str, Any]] = {}

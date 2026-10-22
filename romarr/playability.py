@@ -58,10 +58,10 @@ import re
 import socket
 import ssl
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
+
+import requests
 
 from .platforms import Platform, resolve
 
@@ -1199,27 +1199,34 @@ class StreamServer:
         url = (f"{self.base_url}{PLAY_ROUTE_PATH}?"
                + urllib.parse.urlencode({"platform": slug}))
         try:
-            with urllib.request.urlopen(url, timeout=self.timeout) as response:
-                body = json.loads(response.read().decode("utf-8"))
+            # requests accepts HTTP(S) only, so this configured endpoint cannot
+            # select a file:// handler or read local files.
+            response = requests.get(
+                url, timeout=self.timeout, allow_redirects=False,
+            )
+            response.raise_for_status()
+            body = response.json()
             tier = body.get("tier")
             tier = tier if isinstance(tier, str) else None
             self._reachable = True
-        except urllib.error.HTTPError as exc:
+        except requests.HTTPError as exc:
             # 404 is the server's documented "unplayable" answer and is a real
             # answer, not a failure -- it carries `why`.
             self._reachable = True
             tier = None
-            if exc.code == 404:
+            response = exc.response
+            status = response.status_code if response is not None else 0
+            if status == 404:
                 try:
-                    said = json.loads(exc.read().decode("utf-8")).get("why")
+                    said = response.json().get("why")
                     if isinstance(said, str) and said:
                         self._why[slug] = said
                 except Exception:
                     pass
             else:
-                self._reachable, self._problem = False, f"HTTP {exc.code}"
+                self._reachable, self._problem = False, f"HTTP {status}"
         except Exception as exc:
-            self._reachable, self._problem = False, str(exc)
+            self._reachable, self._problem = False, type(exc).__name__
             tier = None
 
         if self._reachable:
@@ -1645,11 +1652,17 @@ class MoonlightHost:
         """`GET /serverinfo`, the one call that needs nothing."""
         url = f"http://{self.host}:{self.port}{SERVERINFO_PATH}"
         try:
-            with urllib.request.urlopen(url, timeout=self.timeout) as response:
-                body = response.read().decode("utf-8", "replace")
+            # Moonlight requires its uncredentialed /serverinfo probe on the
+            # documented plain-HTTP port; this sends no secret or user data.
+            # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-with-http.request-with-http -- Required by the local Sunshine/Moonlight serverinfo protocol; the request carries no credentials or user data.
+            response = requests.get(url, timeout=self.timeout,
+                                    allow_redirects=False)
+            response.raise_for_status()
+            body = response.text
         except Exception as exc:                # a host being off is normal
-            log.info("moonlight host %s did not answer: %s", self.label, exc)
-            self._reachable, self._problem = False, str(exc)
+            log.info("moonlight host %s did not answer: %s", self.label,
+                     type(exc).__name__)
+            self._reachable, self._problem = False, type(exc).__name__
             self._info = {}
             self._apps, self._apps_read, self._coverage = [], False, {}
             return
@@ -1993,16 +2006,19 @@ class _UnixHTTPConnection(http.client.HTTPConnection):
 def _json_request(url: str, method: str, body, headers: dict,
                   timeout: float) -> dict:
     """One JSON call, with the errors kept legible."""
-    request = urllib.request.Request(url, data=body, method=method,
-                                     headers=headers or {})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:400]
-        if exc.code in (401, 403):
-            raise _NoWayIn(f"HTTP {exc.code}: the credential was refused")
-        raise RuntimeError(_error_sentence(exc.code, detail)) from exc
+    # requests accepts HTTP(S) only, preventing file:// reads through a
+    # configured media-server endpoint.
+    response = requests.request(
+        method, url, data=body, headers=headers or {}, timeout=timeout,
+        allow_redirects=False,
+    )
+    raw = response.text
+    if response.status_code >= 400:
+        detail = raw[:400]
+        if response.status_code in (401, 403):
+            raise _NoWayIn(
+                f"HTTP {response.status_code}: the credential was refused")
+        raise RuntimeError(_error_sentence(response.status_code, detail))
     return json.loads(raw) if raw.strip() else {}
 
 
@@ -2038,6 +2054,8 @@ def _sunshine_json_request(
         raise _NoWayIn(
             f"could not load Sunshine TLS trust configuration ({type(err).__name__})") from err
 
+    # A verified CA or explicit certificate fingerprint is required above.
+    # nosemgrep: python.lang.security.audit.httpsconnection-detected.httpsconnection-detected -- TLS context verifies a trusted CA or pinned fingerprint before credentials are sent.
     connection = http.client.HTTPSConnection(
         host, port=port, timeout=timeout, context=context)
     try:

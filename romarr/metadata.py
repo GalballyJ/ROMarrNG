@@ -32,10 +32,10 @@ import logging
 import re
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -131,16 +131,20 @@ def lookup_key(verification=None, filename: str = "") -> tuple[str, str]:
 # --- providers --------------------------------------------------------------
 
 def _get_json(url: str, headers: dict | None = None):
-    request = urllib.request.Request(url)
-    for name, value in (headers or {}).items():
-        request.add_header(name, value)
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        log.warning("metadata lookup rejected: HTTP %s", exc.code)
-    except Exception as exc:
-        log.warning("metadata lookup failed: %s", exc)
+        # requests accepts HTTP(S) only; provider configuration cannot select
+        # file:// or other local-resource handlers.
+        response = requests.get(
+            url, headers=headers or {}, timeout=TIMEOUT,
+            allow_redirects=False,
+        )
+        if response.status_code >= 400:
+            log.warning("metadata lookup rejected: HTTP %s", response.status_code)
+            return None
+        return response.json()
+    except (requests.RequestException, ValueError) as exc:
+        # URLs may contain provider API keys in their query string.
+        log.warning("metadata lookup failed: %s", exc.__class__.__name__)
     return None
 
 
@@ -279,13 +283,15 @@ def _igdb_bearer(client_id: str, secret: str, *, refresh: bool = False) -> str:
         # rather than as a 401 the caller has to interpret.
         if cached and cached[1] > time.time() + 60:
             return cached[0]
-    query = urllib.parse.urlencode({"client_id": client_id,
-                                    "client_secret": secret,
-                                    "grant_type": "client_credentials"})
-    request = urllib.request.Request(f"{IGDB_TOKEN_URL}?{query}", data=b"",
-                                     method="POST")
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        body = json.loads(response.read().decode("utf-8"))
+    response = requests.post(
+        IGDB_TOKEN_URL,
+        data={"client_id": client_id, "client_secret": secret,
+              "grant_type": "client_credentials"},
+        timeout=TIMEOUT,
+        allow_redirects=False,
+    )
+    response.raise_for_status()
+    body = response.json()
     token = str(body.get("access_token") or "")
     if not token:
         return ""
@@ -315,8 +321,9 @@ def igdb_query(cfg: dict, endpoint: str, body: str, *, strict: bool = False) -> 
         # in this field, because that is what the help text asked for. The
         # exchange failing is the signal; try the stored value verbatim
         # rather than telling somebody their working setup is broken.
-        log.debug("IGDB token exchange refused (%s); using the stored value "
-                  "as a bearer token", exc.__class__.__name__)
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure -- Only the exception class is logged; credentials and response text are excluded.
+        log.debug("IGDB authentication exchange failed (%s); retaining configured value",
+                  exc.__class__.__name__)
         bearer = secret
     if not bearer:
         if strict:
@@ -324,38 +331,34 @@ def igdb_query(cfg: dict, endpoint: str, body: str, *, strict: bool = False) -> 
         return []
     for attempt in (1, 2):
         _igdb_wait()
-        request = urllib.request.Request(f"{IGDB_API}/{endpoint}",
-                                         data=body.encode("utf-8"),
-                                         method="POST")
-        request.add_header("Client-ID", client_id)
-        request.add_header("Authorization", f"Bearer {bearer}")
-        request.add_header("Accept", "application/json")
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-                rows = json.loads(response.read().decode("utf-8"))
+            response = requests.post(
+                f"{IGDB_API}/{endpoint}",
+                data=body.encode("utf-8"),
+                headers={"Client-ID": client_id,
+                         "Authorization": f"Bearer {bearer}",
+                         "Accept": "application/json"},
+                timeout=TIMEOUT,
+                allow_redirects=False,
+            )
+            if response.status_code == 401 and attempt == 1:
+                bearer = _igdb_bearer(client_id, secret, refresh=True)
+                continue
+            if response.status_code >= 400:
+                log.warning("IGDB %s rejected: HTTP %s",
+                            endpoint, response.status_code)
+                if strict:
+                    raise RuntimeError(
+                        f"IGDB request failed with HTTP {response.status_code}")
+                return []
+            rows = response.json()
             if isinstance(rows, list):
                 return rows
             if strict:
                 raise RuntimeError("IGDB returned an invalid catalog response")
             return []
-        except urllib.error.HTTPError as exc:
-            # Sixty days outlives most processes but not all of them, and
-            # Twitch can revoke early. One forced refresh, then it is a real
-            # failure rather than a loop.
-            if exc.code == 401 and attempt == 1:
-                try:
-                    bearer = _igdb_bearer(client_id, secret, refresh=True)
-                except Exception:
-                    if strict:
-                        raise RuntimeError("IGDB authentication failed") from None
-                    return []
-                continue
-            log.warning("IGDB %s rejected: HTTP %s", endpoint, exc.code)
-            if strict:
-                raise RuntimeError(f"IGDB request failed with HTTP {exc.code}") from None
-            return []
-        except Exception as exc:
-            log.warning("IGDB %s failed: %s", endpoint, exc)
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("IGDB %s failed: %s", endpoint, type(exc).__name__)
             if strict:
                 raise RuntimeError("IGDB request failed") from None
             return []
@@ -673,7 +676,7 @@ class Metadata:
                 info = spec["lookup"](cfg, term)
             except Exception as exc:
                 log.warning("metadata provider %r raised: %s",
-                            cfg.get("type"), exc)
+                        cfg.get("type"), type(exc).__name__)
                 continue
             if info.found:
                 return GameInfo(**{**info.__dict__, "matched_by": how})
@@ -857,7 +860,8 @@ def _first_answer(providers: list[dict], table: dict, call):
         try:
             rows = call(answer, cfg)
         except Exception as exc:
-            log.warning("browse via %r failed: %s", name, exc)
+            log.warning("browse via %r failed: %s", name,
+                        type(exc).__name__)
             failed.append(_label(cfg))
             continue
         asked.append(_label(cfg))

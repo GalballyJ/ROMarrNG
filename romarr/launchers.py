@@ -260,6 +260,12 @@ def ea_games(roots: list[Path]) -> list[LocalGame]:
 
 # --- Amazon Games -------------------------------------------------------------
 
+def _quote_sqlite_identifier(identifier: str) -> str:
+    """Quote an identifier read from the launcher's local SQLite schema."""
+    if "\x00" in identifier:
+        raise sqlite3.OperationalError("invalid SQLite identifier")
+    return '"' + identifier.replace('"', '""') + '"'
+
 def amazon_games(database: Path) -> list[LocalGame]:
     """Installed Amazon Games titles, from the launcher's own SQLite.
 
@@ -284,12 +290,18 @@ def amazon_games(database: Path) -> list[LocalGame]:
             tables = []
         for table in tables:
             try:
-                columns = [c[1] for c in connection.execute(
-                    f'PRAGMA table_info("{table}")')]
+                # Table names come from sqlite_master, but are still quoted
+                # with embedded double quotes escaped before use as identifiers.
+                # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- SQLite PRAGMA metadata uses a quoted and escaped identifier.
+                table_info = connection.execute(
+                    f'PRAGMA table_info({_quote_sqlite_identifier(table)})')
+                columns = [column[1] for column in table_info]
                 if "ProductTitle" not in columns:
                     continue
-                for (name,) in connection.execute(
-                        f'SELECT ProductTitle FROM "{table}"'):
+                # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- Reads local SQLite schema using a quoted and escaped identifier.
+                rows = connection.execute(
+                    f'SELECT ProductTitle FROM {_quote_sqlite_identifier(table)}')
+                for (name,) in rows:
                     text = str(name or "").strip()
                     if text:
                         names.append(text)

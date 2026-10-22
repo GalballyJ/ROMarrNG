@@ -44,10 +44,12 @@ from the cause.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
 
 log = logging.getLogger(__name__)
 
@@ -165,19 +167,42 @@ def _open(pw, endpoint: str):
     -- it decides whether the downloaded bytes can get back here at all:
 
       * blank -- launch Chromium on this machine. Everything is local.
-      * ws:// -- a `playwright run-server` on the browser's host. The driver
+      * wss:// -- a `playwright run-server` on the browser's host. The driver
         runs THERE, owns the finished download, and streams it back over the
         same socket. This is the shape to use for a browser in another
         container, because it needs no shared filesystem.
-      * http:// -- a bare `chromium --headless --remote-debugging-port`.
-        Playwright's driver runs HERE and tells that Chromium to save into a
-        path on this machine; a Chromium on another host duly creates that
-        path on its own disk and the file never arrives. It works when the
-        two share a directory, and `remote_dir` is how that is declared.
+      * https:// -- a TLS proxy to a bare `chromium --headless
+        --remote-debugging-port`. Playwright's driver runs HERE and tells that
+        Chromium to save into a path on this machine; a Chromium on another
+        host duly creates that path on its own disk and the file never arrives.
+        It works when the two share a directory, and `remote_dir` is how that
+        is declared. Plain HTTP is accepted only on loopback unless the
+        operator enables ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS.
     """
     if not endpoint:
         return pw.chromium.launch(headless=True, args=list(LAUNCH_ARGS))
-    if endpoint.startswith(("ws://", "wss://")):
+    parsed = urlsplit(endpoint)
+    if parsed.scheme not in {"ws", "wss", "http", "https"}:
+        raise ValueError("Browser endpoint must use WebSocket or HTTP transport")
+    if not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Browser endpoint must have a host and no URL credentials")
+
+    try:
+        loopback = ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        loopback = parsed.hostname.rstrip(".").lower() == "localhost"
+
+    allow_insecure = os.environ.get(
+        "ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if parsed.scheme in {"ws", "http"} and not loopback and not allow_insecure:
+        raise ValueError(
+            "Remote browser endpoints must use TLS; set "
+            "ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS=true only on an "
+            "isolated trusted network if TLS cannot be configured"
+        )
+
+    if parsed.scheme in {"ws", "wss"}:
         return pw.chromium.connect(endpoint)
     return pw.chromium.connect_over_cdp(endpoint)
 
@@ -360,7 +385,7 @@ def _keep(download, destination: Path, remote_dir: str, path_mappings, *,
     """Put the downloaded file where ROMarr can import it.
 
     `save_as` covers two of the three shapes in _open: a local launch, where
-    everything is on one disk, and a `ws://` Playwright server, which streams
+    everything is on one disk, and a secure Playwright server, which streams
     the finished artifact back over its own socket.
 
     It cannot cover the third. A bare `--remote-debugging-port` Chromium on
