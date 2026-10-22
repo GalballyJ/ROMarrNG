@@ -106,10 +106,8 @@ def test_the_mode_is_the_protocol_so_releases_route_to_the_right_one():
 
 
 def test_a_blank_browser_host_means_launch_one_here():
-    """base_url_for defaults the host to localhost, and an unset host
-    assembled into ws://localhost:3000 would point the driver at a machine
-    nobody configured -- failing as a refused connection rather than as the
-    local launch that was asked for."""
+    """A blank host must launch Chromium locally rather than connect to the
+    machine's own default `wss://localhost:3000` endpoint."""
     assert build_client({"type": "browser", "save_path": "/d"})._config.base_url == ""
 
 
@@ -125,6 +123,58 @@ def test_the_endpoint_scheme_decides_how_the_file_gets_back():
     cdp = build_client({"type": "browser", "save_path": "/d",
                         "host": "10.0.0.5", "port": 9222, "scheme": "http"})
     assert cdp._config.base_url == "http://10.0.0.5:9222"
+
+
+class FakeChromium:
+    def __init__(self):
+        self.calls = []
+
+    def launch(self, **kwargs):
+        self.calls.append(("launch", kwargs))
+        return object()
+
+    def connect(self, endpoint):
+        self.calls.append(("connect", endpoint))
+        return object()
+
+    def connect_over_cdp(self, endpoint):
+        self.calls.append(("connect_over_cdp", endpoint))
+        return object()
+
+
+class FakePlaywright:
+    def __init__(self):
+        self.chromium = FakeChromium()
+
+
+def test_remote_browser_endpoints_require_tls_by_default(monkeypatch):
+    monkeypatch.delenv("ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS", raising=False)
+    for endpoint in ("ws://browser.lan:3000", "http://browser.lan:9222"):
+        with pytest.raises(ValueError, match="must use TLS"):
+            browser._open(FakePlaywright(), endpoint)
+
+
+def test_loopback_browser_endpoints_may_use_cleartext(monkeypatch):
+    monkeypatch.delenv("ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS", raising=False)
+    for endpoint in ("ws://localhost:3000", "http://127.0.0.1:9222"):
+        fake = FakePlaywright()
+        browser._open(fake, endpoint)
+        assert fake.chromium.calls[0][0] in {"connect", "connect_over_cdp"}
+
+
+def test_cleartext_browser_override_is_explicit_and_limited_to_transport(monkeypatch):
+    monkeypatch.setenv("ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS", "true")
+    fake = FakePlaywright()
+    browser._open(fake, "wss://browser.lan:3000")
+    browser._open(fake, "ws://browser.lan:3000")
+    browser._open(fake, "http://browser.lan:9222")
+    assert [call[0] for call in fake.chromium.calls] == [
+        "connect", "connect", "connect_over_cdp",
+    ]
+    with pytest.raises(ValueError, match="no URL credentials"):
+        browser._open(fake, "https://user:password@browser.lan:9222")
+    with pytest.raises(ValueError, match="must use WebSocket or HTTP"):
+        browser._open(fake, "file:///etc/passwd")
 
 
 def test_an_unconfigured_client_is_inert(tmp_path):

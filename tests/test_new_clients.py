@@ -77,6 +77,15 @@ def test_rtorrent_unconfigured_is_inert():
     assert client.completed() == []
 
 
+def test_rtorrent_xmlrpc_parser_rejects_entity_expansion():
+    from defusedxml.common import EntitiesForbidden
+    from xmlrpc.client import loads
+
+    payload = b"""<?xml version="1.0"?><!DOCTYPE methodResponse [<!ENTITY x "expanded">]><methodResponse><params><param><value><string>&x;</string></value></param></params></methodResponse>"""
+    with pytest.raises(EntitiesForbidden):
+        loads(payload)
+
+
 def test_rtorrent_build_embeds_credentials_in_the_url():
     client = build_client({"type": "rtorrent", "host": "rt", "port": 8080,
                            "username": "u", "password": "p@ss"})

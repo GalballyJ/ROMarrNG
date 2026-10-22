@@ -464,7 +464,11 @@ def test_validation_child_environment_uses_allowlist_and_private_directories(tmp
         assert stat.S_IMODE((environment_root / "home").stat().st_mode) == 0o700
 
 
-def test_runtime_probe_environment_uses_the_toolchain_allowlist() -> None:
+def test_runtime_probe_environment_uses_the_toolchain_allowlist(tmp_path: Path) -> None:
+    tool_cache = tmp_path / "tool-cache"
+    python_root = tool_cache / "Python" / "3.13.17" / "x64"
+    python_library = python_root / "lib"
+    python_library.mkdir(parents=True)
     environment = inherited_toolchain_environment({
         "PATH": "/toolchain/bin",
         "PYENV_ROOT": "/toolchain/pyenv",
@@ -472,11 +476,31 @@ def test_runtime_probe_environment_uses_the_toolchain_allowlist() -> None:
         "GITHUB_TOKEN": "synthetic-token",
         "HTTPS_PROXY": "http://proxy.invalid",
         "RANDOM_PRIVATE_VALUE": "synthetic-private-value",
+        "RUNNER_TOOL_CACHE": str(tool_cache),
+        "Python_ROOT_DIR": str(python_root),
+        "LD_LIBRARY_PATH": str(python_library),
     })
     assert environment == {
         "PATH": "/toolchain/bin",
         "PYENV_ROOT": "/toolchain/pyenv",
+        "LD_LIBRARY_PATH": str(python_library),
     }
+
+    untrusted_loader_environment = inherited_toolchain_environment({
+        "PATH": "/toolchain/bin",
+        "RUNNER_TOOL_CACHE": str(tool_cache),
+        "Python_ROOT_DIR": str(python_root),
+        "LD_LIBRARY_PATH": str(tool_cache / "outside"),
+    })
+    assert "LD_LIBRARY_PATH" not in untrusted_loader_environment
+
+    current_directory_loader_environment = inherited_toolchain_environment({
+        "PATH": "/toolchain/bin",
+        "RUNNER_TOOL_CACHE": str(tool_cache),
+        "Python_ROOT_DIR": str(python_root),
+        "LD_LIBRARY_PATH": str(python_library) + os.pathsep,
+    })
+    assert "LD_LIBRARY_PATH" not in current_directory_loader_environment
 
 
 def test_native_task_writes_private_log_and_records_result_counts(tmp_path: Path) -> None:
@@ -553,6 +577,13 @@ def test_validation_child_process_environment_is_allowlisted(
         "SSL_CERT_DIR": "/operator/certs/ssl",
         "GITHUB_TOKEN": "synthetic-token",
     }
+    tool_cache = tmp_path / "tool-cache"
+    python_root = tool_cache / "Python" / "3.13.17" / "x64"
+    python_library = python_root / "lib"
+    python_library.mkdir(parents=True)
+    monkeypatch.setenv("RUNNER_TOOL_CACHE", str(tool_cache))
+    monkeypatch.setenv("Python_ROOT_DIR", str(python_root))
+    monkeypatch.setenv("LD_LIBRARY_PATH", str(python_library))
     # Clear case-insensitively first: on Windows deleting `https_proxy` after
     # setting `HTTPS_PROXY` removes that same environment entry.
     for name in set(inherited) | {
@@ -562,8 +593,9 @@ def test_validation_child_process_environment_is_allowlisted(
     for name, value in inherited.items():
         monkeypatch.setenv(name, value)
 
+    probe_keys = list(inherited) + ["LD_LIBRARY_PATH"]
     code = (
-        "import json, os; keys = " + repr(list(inherited))
+        "import json, os; keys = " + repr(probe_keys)
         + "; print(json.dumps({key: os.environ.get(key) for key in keys}))"
     )
     report = {}
@@ -587,6 +619,9 @@ def test_validation_child_process_environment_is_allowlisted(
         expected = None if name == "GITHUB_TOKEN" else value
         assert report["install-test-dependencies"][name] == expected
         assert report["pytest-suite"][name] is None
+    expected_library_path = str(python_library) if os.name != "nt" else None
+    assert report["install-test-dependencies"]["LD_LIBRARY_PATH"] == expected_library_path
+    assert report["pytest-suite"]["LD_LIBRARY_PATH"] == expected_library_path
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"),
