@@ -163,6 +163,7 @@ def fetch_entries(cfg: dict, *, session=None) -> list[ListEntry]:
 #: what Legendary, Heroic and Playnite all authenticate as, because Epic
 #: issues no per-application credentials for this.
 EPIC_CLIENT = "34a02cf8f4414e29b15921876da36f9a"
+# nosemgrep: generic.secrets.security.detected-generic-secret.detected-generic-secret -- This is the public Epic launcher OAuth secret embedded in Epic-compatible clients, not a private account credential.
 EPIC_SECRET = "daafbccc737745039dffe53d94fc76cf"
 EPIC_TOKEN = ("https://account-public-service-prod03.ol.epicgames.com"
               "/account/api/oauth/token")

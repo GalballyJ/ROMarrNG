@@ -141,7 +141,8 @@ def hash_bytes(data: bytes, *, suffix: str = "") -> dict:
         "size": len(body),
         "crc": f"{zlib.crc32(body) & 0xFFFFFFFF:08x}",
         "md5": hashlib.md5(body, usedforsecurity=False).hexdigest(),
-        "sha1": hashlib.sha1(body, usedforsecurity=False).hexdigest(),
+        # DAT formats require SHA-1 as a legacy ROM identity checksum.
+        "sha1": hashlib.sha1(body, usedforsecurity=False).hexdigest(),  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
     }
 
 
@@ -169,7 +170,7 @@ def hash_stream(handle, *, suffix="", size=0, chunk=1024 * 1024) -> dict:
     start = header_size(suffix, size)
     crc = 0
     md5 = hashlib.md5(usedforsecurity=False)
-    sha1 = hashlib.sha1(usedforsecurity=False)
+    sha1 = hashlib.sha1(usedforsecurity=False)  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
     size = 0
     if start:
         handle.read(start)

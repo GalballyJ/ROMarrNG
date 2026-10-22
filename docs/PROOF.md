@@ -74,13 +74,15 @@ tested against fixtures and **never deployed** — `pip install playwright` had
 never been run and no browser container existed. It is now deployed, and the
 rows below separate what a live run proved from what it could not reach.
 
-The browser container is **CT 134 `browser-proof`** on node Thiccc,
-`192.168.0.134`, 2 GB / 8 GB, running `playwright run-server` on
-`ws://…:3000` under a systemd unit.
+The browser container is a separate machine running `playwright run-server`
+under a systemd unit. The proof used an unencrypted WebSocket on an isolated
+trusted LAN; current deployments should terminate TLS and use `wss://`.
+`ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS=true` is an explicit compatibility
+opt-in for a trusted isolated network where TLS is unavailable.
 
 | Claim | How it is proven | Evidence |
 |---|---|---|
-| ROMarr drives a browser in another container over `ws://` | A real `playwright run-server` on CT 134 and the pip package (no browser) on the ROMarr host. `POST /api/v1/downloadclient/test` for the saved row answered `{"ok": true, "message": "Connected"}`, and the client list reports `"detail": "connected to chromium 151.0.7922.34"` | Run 2026-08-12 against ROMarr at commit `d0931bc` on LXC 182. Both sides pinned to playwright **1.62.0** — a version skew between client and run-server is the first thing to check if this ever stops connecting |
+| ROMarr drives a browser in another container over a WebSocket | A real `playwright run-server` on the separate container and the pip package (no browser) on the ROMarr host. `POST /api/v1/downloadclient/test` for the saved row answered `{"ok": true, "message": "Connected"}`, and the client list reports `"detail": "connected to chromium 151.0.7922.34"` | Run 2026-08-12 against ROMarr at commit `d0931bc` on LXC 182 with `ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS=true` on the isolated trusted LAN. Both sides pinned to playwright **1.62.0** — a version skew between client and run-server is the first thing to check if this ever stops connecting |
 | A real file arrives, through ROMarr's own importer | The browser client was saved through `POST /api/v1/downloadclient`, handed a job through the same `build_client()` the grab path uses, and the bytes were fetched by **`POST /api/import`** — ROMarr's own sweep, over HTTP, not a script calling Playwright | `360799main_base_E.zip` from `archive.org/download/basestation-198101/`, **3,053 bytes**, `md5 87f0d1988849b67aad826fd81dbbd3f1`, `sha1 d2605c1e1a848a5eb86b06addfe11870cb08e761`, `sha256 2ab873a8e5704d156e64b2ffd216904484b705a43955321cbfef6cdae49cf800`. The md5 and sha1 **match Archive.org's own published checksums** for that file, so the bytes are the file and not an error page. A NASA item, deliberately: no copyrighted game was downloaded to prove this |
 | Chromium is genuinely absent from the ROMarr host | With no endpoint configured, `GET /api/v1/downloadclient/browser` reports `Executable doesn't exist … chrome-headless-shell` and `available: false` | Same run. The ROMarr container has ~400 MB of RAM free; `apt-get install -s chromium` there is 236 packages / 867 MB, which is why the browser lives in its own container |
 | The robots gate refuses before it fetches | `https://archive.org/control/…` — a path that site's own `robots.txt` disallows — was queued and came back `failed / robots.txt disallows this path` with no request made | Same run, in the ledger beside the successful row |

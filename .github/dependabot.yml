@@ -7,6 +7,8 @@ updates:
       day: monday
       time: "09:00"
       timezone: America/Regina
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     versioning-strategy: increase
     groups:
@@ -29,6 +31,8 @@ updates:
       day: monday
       time: "09:15"
       timezone: America/Regina
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       release-note-none-launchbox-proof-nuget-minor-and-patch:
@@ -50,6 +54,8 @@ updates:
       day: monday
       time: "09:30"
       timezone: America/Regina
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       release-note-none-launchbox-plugin-nuget-minor-and-patch:
@@ -71,6 +77,8 @@ updates:
       day: tuesday
       time: "09:00"
       timezone: America/Regina
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       release-note-none-docker-minor-and-patch:
@@ -92,6 +100,8 @@ updates:
       day: tuesday
       time: "09:15"
       timezone: America/Regina
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       release-note-none-compose-minor-and-patch:
@@ -113,6 +123,8 @@ updates:
       day: wednesday
       time: "09:00"
       timezone: America/Regina
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       release-note-none-actions-minor-and-patch:

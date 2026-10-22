@@ -483,7 +483,8 @@ def apply_patch(rom: bytes, patch: bytes, version: dict | None = None) -> tuple[
         raise PatchError("The game file is larger than allowed.", "PATCH_FAILED")
     if fmt == "ips":
         base = (version or {}).get("base") or {}
-        if base.get("sha1") and hashlib.sha1(rom).hexdigest() != base["sha1"]:
+        # Patch manifests use SHA-1 as a legacy game-file identity field.
+        if base.get("sha1") and hashlib.sha1(rom, usedforsecurity=False).hexdigest() != base["sha1"]:  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
             raise PatchError("This is not the game dump the patch was made for.", "BASE_MISMATCH")
         if base.get("crc32") and f"{_crc(rom):08x}" != base["crc32"]:
             raise PatchError("This is not the game dump the patch was made for.", "BASE_MISMATCH")
@@ -532,4 +533,4 @@ def prepare_patched_file(
     temporary.replace(target)
     return Prepared(target, fmt, verified=fmt != "ips" or bool(
         version.get("base", {}).get("sha1") or version.get("base", {}).get("crc32")),
-        sha1=hashlib.sha1(patched).hexdigest())
+        sha1=hashlib.sha1(patched, usedforsecurity=False).hexdigest())  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1

@@ -1199,7 +1199,8 @@ class StreamServer:
         url = (f"{self.base_url}{PLAY_ROUTE_PATH}?"
                + urllib.parse.urlencode({"platform": slug}))
         try:
-            with urllib.request.urlopen(url, timeout=self.timeout) as response:
+            # base_url is administrator-configured for the local game server.
+            with urllib.request.urlopen(url, timeout=self.timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 body = json.loads(response.read().decode("utf-8"))
             tier = body.get("tier")
             tier = tier if isinstance(tier, str) else None
@@ -1645,7 +1646,8 @@ class MoonlightHost:
         """`GET /serverinfo`, the one call that needs nothing."""
         url = f"http://{self.host}:{self.port}{SERVERINFO_PATH}"
         try:
-            with urllib.request.urlopen(url, timeout=self.timeout) as response:
+            # host and port come from the operator's configured Moonlight host.
+            with urllib.request.urlopen(url, timeout=self.timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 body = response.read().decode("utf-8", "replace")
         except Exception as exc:                # a host being off is normal
             log.info("moonlight host %s did not answer: %s", self.label, exc)
@@ -1996,7 +1998,8 @@ def _json_request(url: str, method: str, body, headers: dict,
     request = urllib.request.Request(url, data=body, method=method,
                                      headers=headers or {})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        # Callers build this URL for a configured media-server endpoint.
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             raw = response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:400]
@@ -2038,7 +2041,8 @@ def _sunshine_json_request(
         raise _NoWayIn(
             f"could not load Sunshine TLS trust configuration ({type(err).__name__})") from err
 
-    connection = http.client.HTTPSConnection(
+    # A verified CA or explicit certificate fingerprint is required above.
+    connection = http.client.HTTPSConnection(  # nosemgrep: python.lang.security.audit.httpsconnection-detected.httpsconnection-detected
         host, port=port, timeout=timeout, context=context)
     try:
         connection.connect()

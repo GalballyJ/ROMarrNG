@@ -237,7 +237,8 @@ urllib.request.urlopen(
         service.store.put_item("download_clients", {"type": "hub", "enable": True,
                               "save_path": str(root / "downloads"), "name": "Proof Hub"})
         service.reload_clients()
-        digest = hashlib.sha1(payload).hexdigest()
+        # DAT's schema requires SHA-1 as a non-security ROM identity checksum.
+        digest = hashlib.sha1(payload, usedforsecurity=False).hexdigest()  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
         service.dats.add(parse_dat(f'''<datafile><header><name>Nintendo - Super Nintendo Entertainment System</name></header>
 <game name="Proof Game (USA)"><rom name="Proof Game (USA).sfc" size="{len(payload)}" sha1="{digest}"/></game>
 <game name="Excluded Game (Japan)"/></datafile>'''))
@@ -248,7 +249,8 @@ urllib.request.urlopen(
             req = Request(base + path, data=json.dumps(body).encode() if body is not None else None,
                           headers={"X-Api-Key": service.auth.integration_key,
                                    "Content-Type": "application/json"})
-            with urlopen(req, timeout=30) as response:
+            # The ephemeral test API binds only to 127.0.0.1 on a random port.
+            with urlopen(req, timeout=30) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 data = response.read()
                 return data if raw else json.loads(data)
         try:

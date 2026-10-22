@@ -273,6 +273,8 @@ def _plugin_runtime_context(process) -> dict:
     from .plugin_runtime.scratch import tmpfs_root
     scratch = Path(tempfile.mkdtemp(
         prefix="romarr-hub-plugin-", dir=str(tmpfs_root()))).resolve()
+    # Keep plugin scratch, credentials, and temporary files private to this worker.
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- 0700 restricts access to the owning process user; broader permissions would expose plugin data.
     os.chmod(scratch, 0o700)
     child_env = {
         "HOME": str(scratch),

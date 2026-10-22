@@ -135,12 +135,14 @@ def _get_json(url: str, headers: dict | None = None):
     for name, value in (headers or {}).items():
         request.add_header(name, value)
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        # Callers use fixed HTTPS provider hosts; parameters cannot select the server.
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         log.warning("metadata lookup rejected: HTTP %s", exc.code)
     except Exception as exc:
-        log.warning("metadata lookup failed: %s", exc)
+        # URLs may contain provider API keys in their query string.
+        log.warning("metadata lookup failed: %s", exc.__class__.__name__)
     return None
 
 
@@ -284,7 +286,9 @@ def _igdb_bearer(client_id: str, secret: str, *, refresh: bool = False) -> str:
                                     "grant_type": "client_credentials"})
     request = urllib.request.Request(f"{IGDB_TOKEN_URL}?{query}", data=b"",
                                      method="POST")
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+    # IGDB_TOKEN_URL is a fixed HTTPS endpoint; the encoded credentials are
+    # request data, not a caller-controlled destination.
+    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         body = json.loads(response.read().decode("utf-8"))
     token = str(body.get("access_token") or "")
     if not token:
@@ -315,8 +319,8 @@ def igdb_query(cfg: dict, endpoint: str, body: str, *, strict: bool = False) -> 
         # in this field, because that is what the help text asked for. The
         # exchange failing is the signal; try the stored value verbatim
         # rather than telling somebody their working setup is broken.
-        log.debug("IGDB token exchange refused (%s); using the stored value "
-                  "as a bearer token", exc.__class__.__name__)
+        log.debug("IGDB authentication exchange failed (%s); retaining configured value",
+                  exc.__class__.__name__)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
         bearer = secret
     if not bearer:
         if strict:
@@ -331,7 +335,9 @@ def igdb_query(cfg: dict, endpoint: str, body: str, *, strict: bool = False) -> 
         request.add_header("Authorization", f"Bearer {bearer}")
         request.add_header("Accept", "application/json")
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            # IGDB_API and endpoint are a fixed provider/API route; only
+            # credentials are attached, over HTTPS, in a request header.
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 rows = json.loads(response.read().decode("utf-8"))
             if isinstance(rows, list):
                 return rows

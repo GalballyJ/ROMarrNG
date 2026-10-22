@@ -76,7 +76,9 @@ def main() -> int:
         headers={"Content-Type": "application/json", "X-Api-Key": key},
         method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        # This operator-invoked utility posts only to the destination supplied
+        # on its command line; it is not reachable through the app's web API.
+        with urllib.request.urlopen(request, timeout=60) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             saved = json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as exc:
         print(f"\nROMarr refused the list: HTTP {exc.code}", file=sys.stderr)

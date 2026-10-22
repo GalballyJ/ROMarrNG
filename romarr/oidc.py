@@ -355,7 +355,8 @@ class OIDCAuth:
             claims.validate(leeway=60)
             payload = dict(claims)
         except Exception as error:
-            log.debug("OIDC ID token validation failed (%s)", type(error).__name__)
+            # Token contents and claims are intentionally excluded from logs.
+            log.debug("OIDC ID token validation failed (%s)", type(error).__name__)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             raise OIDCAuthError("invalid_id_token") from None
 
         audiences = payload.get("aud")
