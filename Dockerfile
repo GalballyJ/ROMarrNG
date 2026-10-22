@@ -97,5 +97,9 @@ LABEL org.opencontainers.image.title="ROMarrNG" \
       org.opencontainers.image.source="https://github.com/snapetech-org/ROMarrNG" \
       org.opencontainers.image.licenses="MIT"
 
+# The entrypoint prepares only /config as root, then drops to PUID:PGID before
+# running the app. A fixed Docker USER would break ownership for mounted config.
+# nosemgrep: dockerfile.security.missing-user-entrypoint.missing-user-entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
+# nosemgrep: dockerfile.security.missing-user.missing-user
 CMD ["python", "-m", "romarr"]
