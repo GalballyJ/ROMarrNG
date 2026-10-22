@@ -26,58 +26,7 @@ TRUSTED_MAIN_EVENT_CONDITIONS = {
 }
 
 
-PUBLIC_FORK_VALIDATION_RUNNER = (
-    "$" + "{{ github.event_name == 'pull_request' "
-    "&& github.event.pull_request.head.repo.fork == true "
-    "&& github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name "
-    "&& github.event.pull_request.base.repo.full_name == 'snapetech-org/ROMarrNG' "
-    "&& github.event.pull_request.base.ref == 'main' "
-    "&& fromJSON('{\"group\":\"public-fork-jit\",\"labels\":[\"self-hosted\",\"linux\",\"x64\",\"public-pr-romarrng\"]}') "
-    "|| 'ubuntu-latest' }}"
-)
 GVISOR_SANDBOX_RUNNER = {"group": "gvisor-sandbox", "labels": "gvisor-sandbox"}
-PUBLIC_FORK_CALLER_CONDITION = (
-    "github.event.pull_request.head.repo.fork == true && "
-    "github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name && "
-    "github.event.pull_request.base.repo.full_name == 'snapetech-org/ROMarrNG' && "
-    "github.event.pull_request.base.ref == 'main'"
-)
-PUBLIC_FORK_CALLER_USES = (
-    "snapetech-org/ROMarrNG/.github/workflows/fork-safe-validation.yml"
-    "@0fd03194a4a067bb3c35e44afbdc8ad80ae497aa"
-)
-
-
-def _is_approved_public_fork_caller(
-    workflow: Path, job_name: str, job: dict, document: dict
-) -> bool:
-    workflow_events = document.get("on")
-    if workflow_events is None:
-        workflow_events = document.get(True)
-    pull_request = {
-        "branches": ["main"],
-        "types": ["opened", "synchronize", "reopened", "ready_for_review"],
-    }
-    expected_concurrency = {
-        "group": "public-fork-pr-" + "$" + "{{ github.event.pull_request.number }}",
-        "cancel-in-progress": True,
-    }
-    return (
-        workflow.name == "public-fork-pr.yml"
-        and job_name == "validate"
-        and set(document) == {"name", True, "permissions", "concurrency", "jobs"}
-        and document.get("name") == "ROMarrNG fork PR validation"
-        and workflow_events == {"pull_request": pull_request}
-        and document.get("permissions") == {"contents": "read"}
-        and document.get("concurrency") == expected_concurrency
-        and set(job) == {"name", "if", "permissions", "uses"}
-        and job.get("name") == "Run disposable fork validation"
-        and job.get("if") == PUBLIC_FORK_CALLER_CONDITION
-        and job.get("permissions") == {"contents": "read"}
-        and job.get("uses") == PUBLIC_FORK_CALLER_USES
-    )
-
-
 def _is_approved_gvisor_sandbox_job(
     workflow: Path, job_name: str, job: dict, document: dict
 ) -> bool:
@@ -148,9 +97,6 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
                 )
                 continue
             if "uses" in job and "runs-on" not in job:
-                if _is_approved_public_fork_caller(workflow, job_name, job, document):
-                    runner_count += 1
-                    continue
                 violations.append(
                     f"{workflow.name}/{job_name}: reusable workflow runner is not "
                     "visible in this file"
@@ -161,12 +107,6 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
             runner_count += 1
             location = f"{workflow.name}/{job_name}"
             if _is_approved_gvisor_sandbox_job(workflow, job_name, job, document):
-                continue
-            if (
-                workflow.name == "fork-safe-validation.yml"
-                and job_name == "validate"
-                and runner == PUBLIC_FORK_VALIDATION_RUNNER
-            ):
                 continue
             if _is_trusted_main_runner(workflow, runner):
                 continue
@@ -230,7 +170,7 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
         self.assertEqual(
             _runner_policy_violations(WORKFLOW_DIR),
             [],
-            "only the exact trusted-main, external-fork JIT, or main-only gVisor smoke job may select runner groups",
+            "only the exact trusted-main or main-only gVisor smoke job may select runner groups",
         )
 
     def test_trusted_main_runner_is_scoped_to_this_project_and_run(self) -> None:
@@ -255,12 +195,12 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
             )
         )
 
-    def test_fork_jit_runner_is_rejected_outside_the_approved_workflow(self) -> None:
+    def test_reusable_workflows_must_keep_runner_policy_visible(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workflow_dir = Path(temporary_directory)
-            (workflow_dir / "unrelated.yml").write_text(
+            (workflow_dir / "reusable.yml").write_text(
                 yaml.safe_dump(
-                    {"jobs": {"validate": {"runs-on": PUBLIC_FORK_VALIDATION_RUNNER}}},
+                    {"jobs": {"validate": {"uses": "org/repo/.github/workflows/ci.yml@main"}}},
                     sort_keys=False,
                 ),
                 encoding="utf-8",
@@ -268,26 +208,7 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
             violations = _runner_policy_violations(workflow_dir)
 
         self.assertEqual(len(violations), 1)
-        self.assertIn("unsupported runner assignment", violations[0])
-
-    def test_fork_jit_runner_requires_the_exact_approval_condition(self) -> None:
-        unsafe_runner = PUBLIC_FORK_VALIDATION_RUNNER.replace(
-            "github.event.pull_request.base.ref == 'main'",
-            "github.event.pull_request.base.ref != 'main'",
-        )
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            workflow_dir = Path(temporary_directory)
-            (workflow_dir / "fork-safe-validation.yml").write_text(
-                yaml.safe_dump(
-                    {"jobs": {"validate": {"runs-on": unsafe_runner}}},
-                    sort_keys=False,
-                ),
-                encoding="utf-8",
-            )
-            violations = _runner_policy_violations(workflow_dir)
-
-        self.assertEqual(len(violations), 1)
-        self.assertIn("unsupported runner assignment", violations[0])
+        self.assertIn("reusable workflow runner is not visible", violations[0])
 
     def test_quoted_runner_key_in_yaml_file_is_checked(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

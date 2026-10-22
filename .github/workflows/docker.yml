@@ -71,55 +71,11 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Run source-bound pytest validation
-        env:
-          TMPDIR: ${{ runner.temp }}
-          VALIDATION_NODE_ID: romarrng-pytest-linux
-          VALIDATION_RECEIPT_EXPORT: ${{ runner.temp }}/romarr-validation/pytest.json
-        run: python3.13 -m scripts.validation_engine.engine --tests-only
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest PyYAML
 
-      - name: Stage failed pytest task logs
-        if: always()
-        env:
-          PRIVATE_RUNNER_TEMP: ${{ runner.temp }}
-          VALIDATION_RECEIPT_EXPORT: ${{ runner.temp }}/romarr-validation/pytest.json
-        run: python3.13 -m scripts.validation_engine.retain_failed_pytest_logs
-
-      - name: Retain pytest validation receipt and failed task logs
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: romarrng-validation-receipt-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/romarr-validation/pytest.json
-            ${{ runner.temp }}/romarr-validation/failed-task-logs/manifest.json
-            ${{ runner.temp }}/romarr-validation/failed-task-logs/*.log
-          if-no-files-found: warn
-          retention-days: 7
-  validation-environment-portability:
-    name: Validation child environment (${{ matrix.os }})
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13"
-      - name: Install pytest
-        run: python -m pip install --disable-pip-version-check pytest
-      - name: Probe the real validation child environment
-        run: >-
-          python -m pytest tests/test_validation_engine.py -q
-          -k validation_child_process_environment_is_allowlisted
-      - name: Verify sandbox path policy with native Windows Node
-        if: runner.os == 'Windows'
-        run: node --test scripts/validation_engine/trusted-test-launcher.contract.mjs
+      - name: Run pytest suite
+        run: python -m pytest tests/ -q
 
   acquisition-proof:
     name: Packaged acquisition (${{ matrix.dockerfile }})
@@ -159,20 +115,6 @@ jobs:
 
       - name: Validate stable image tag policy
         run: python scripts/check_image_alias_policy.py
-
-      - name: Download current-run test receipt
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.3.0
-        with:
-          name: romarrng-validation-receipt-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/romarr-validation
-
-      - name: Verify run, attempt, source and pytest inventory
-        run: >-
-          python -m scripts.validation_engine.reconcile
-          --receipt "$RUNNER_TEMP/romarr-validation/pytest.json"
-          --run-id "$GITHUB_RUN_ID"
-          --run-attempt "$GITHUB_RUN_ATTEMPT"
-          --sha "$GITHUB_SHA"
 
       - name: Validate release tag
         if: startsWith(github.ref, 'refs/tags/v')

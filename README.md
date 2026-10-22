@@ -1098,8 +1098,7 @@ checks at merge time, and remaining deployment checks, see the
 [upstream implementation report](docs/UPSTREAM_IMPLEMENTATION_REPORT.md).
 The supporting documents are the [complete issue/PR audit](docs/UPSTREAM_AUDIT.md),
 [fork comparison](docs/UPSTREAM-PARITY.md), [SeerrNG API guide](docs/SEERRNG-INTEGRATION.md),
-[security model](SECURITY.md), [proof ledger](docs/PROOF.md), and
-[validation-engine guide](docs/development/validation-engine.md).
+[security model](SECURITY.md), and [proof ledger](docs/PROOF.md).
 
 ## State of the project
 
@@ -1107,9 +1106,9 @@ An honest map of what is solid, what is thin, and where a contribution
 lands hardest. CI validates pull requests, pushes to `main`, and version-tag
 pushes; manual runs may target any ref. Pushes to other branches do not trigger
 the Docker workflow. Pull requests, version tags, and manual runs outside main
-use GitHub-hosted runners. All Linux pytest jobs run on GitHub-hosted `ubuntu-latest` runners. PR image builds
-use read-only permissions; only main and version-tag workflows, plus manual runs
-on main, can publish images. In the 2026-10-12 local full-suite run, 2,319 tests
+use GitHub-hosted runners; main validation uses the configured shared runner. PR
+image builds use read-only permissions; only main and version-tag workflows, plus
+manual runs on main, can publish images. In the 2026-10-12 local full-suite run, 2,319 tests
 passed, 3 were skipped, and 1 network test was deselected.
 The numbers below are per area, and "tested against fakes" means the protocol
 conversation is asserted but no live server was in the loop.
