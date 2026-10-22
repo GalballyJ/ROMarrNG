@@ -149,7 +149,7 @@ class FakePlaywright:
 
 def test_remote_browser_endpoints_require_tls_by_default(monkeypatch):
     monkeypatch.delenv("ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS", raising=False)
-    for endpoint in ("ws://browser.lan:3000", "http://browser.lan:9222"):
+    for endpoint in ("ws://browser.lan:3000", "http://browser.lan:9222"):  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket -- This test verifies the remote cleartext endpoint is rejected.
         with pytest.raises(ValueError, match="must use TLS"):
             browser._open(FakePlaywright(), endpoint)
 
@@ -166,7 +166,7 @@ def test_cleartext_browser_override_is_explicit_and_limited_to_transport(monkeyp
     monkeypatch.setenv("ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS", "true")
     fake = FakePlaywright()
     browser._open(fake, "wss://browser.lan:3000")
-    browser._open(fake, "ws://browser.lan:3000")
+    browser._open(fake, "ws://browser.lan:3000")  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket -- Explicit opt-in behavior is covered by this test.
     browser._open(fake, "http://browser.lan:9222")
     assert [call[0] for call in fake.chromium.calls] == [
         "connect", "connect", "connect_over_cdp",
