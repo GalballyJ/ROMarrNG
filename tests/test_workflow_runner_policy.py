@@ -8,16 +8,22 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
 HOSTED_RUNNERS = {"ubuntu-latest", "macos-latest", "windows-latest"}
-TRUSTED_MAIN_CONDITION = (
-    "((github.event_name == 'push' && github.ref == 'refs/heads/main') "
-    "|| (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))"
+TRUSTED_MAIN_WORKFLOWS = {
+    "docker.yml",
+    "semgrep-community.yml",
+    "trivy-filesystem.yml",
+}
+TRUSTED_MAIN_RUNNER_PAYLOAD = (
+    "fromJSON(format('{{\"group\":\"ng-shared-main-jit\","
+    "\"labels\":[\"self-hosted\",\"linux\",\"x64\","
+    "\"ng-shared-main-romarrng\",\"ng-main-run-{0}\"]}}', github.run_id))"
 )
-TRUSTED_MAIN_RUNNER_JSON = '{"group":"trusted-main","labels":["self-hosted","Linux","X64","host"]}'
-TRUSTED_MAIN_RUNNER = (
-    "$" + "{{ (" + TRUSTED_MAIN_CONDITION
-    + " && vars.TRUSTED_MAIN_RUNNERS_ENABLED == 'true' "
-    + "&& fromJSON('" + TRUSTED_MAIN_RUNNER_JSON + "')) || 'ubuntu-latest' }}"
-)
+TRUSTED_MAIN_EVENT_CONDITIONS = {
+    "(github.event_name == 'push' || github.event_name == 'workflow_dispatch') "
+    "&& github.ref == 'refs/heads/main'",
+    "(github.event_name == 'push' || github.event_name == 'workflow_dispatch' "
+    "|| github.event_name == 'schedule') && github.ref == 'refs/heads/main'",
+}
 
 
 PUBLIC_FORK_VALIDATION_RUNNER = (
@@ -91,6 +97,27 @@ def _is_approved_gvisor_sandbox_job(
     )
 
 
+def _is_trusted_main_runner(workflow: Path, runner: object) -> bool:
+    if workflow.name not in TRUSTED_MAIN_WORKFLOWS or not isinstance(runner, str):
+        return False
+    if not (runner.startswith("${{ ") and runner.endswith(" }}")):
+        return False
+
+    expression = runner[4:-3]
+    condition, separator, fallback = expression.partition(
+        " && " + TRUSTED_MAIN_RUNNER_PAYLOAD
+    )
+    if not separator:
+        return False
+    matrix_runner = condition.startswith("matrix.os == 'ubuntu-latest' && ")
+    if matrix_runner:
+        condition = condition.removeprefix("matrix.os == 'ubuntu-latest' && ")
+    if condition not in TRUSTED_MAIN_EVENT_CONDITIONS:
+        return False
+    expected_fallback = " || matrix.os" if matrix_runner else " || 'ubuntu-latest'"
+    return fallback == expected_fallback
+
+
 def _runner_policy_violations(workflow_dir: Path) -> list[str]:
     workflow_files = sorted(
         path
@@ -141,11 +168,7 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
                 and runner == PUBLIC_FORK_VALIDATION_RUNNER
             ):
                 continue
-            if (
-                workflow.name == "docker.yml"
-                and job_name == "test"
-                and runner == TRUSTED_MAIN_RUNNER
-            ):
+            if _is_trusted_main_runner(workflow, runner):
                 continue
             if runner == "ubuntu-latest":
                 continue
@@ -197,6 +220,28 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
             _runner_policy_violations(WORKFLOW_DIR),
             [],
             "only the exact trusted-main, external-fork JIT, or main-only gVisor smoke job may select runner groups",
+        )
+
+    def test_trusted_main_runner_is_scoped_to_this_project_and_run(self) -> None:
+        condition = next(iter(TRUSTED_MAIN_EVENT_CONDITIONS))
+        valid_runner = (
+            "${{ " + condition + " && " + TRUSTED_MAIN_RUNNER_PAYLOAD
+            + " || 'ubuntu-latest' }}"
+        )
+
+        self.assertTrue(_is_trusted_main_runner(Path("docker.yml"), valid_runner))
+        self.assertFalse(_is_trusted_main_runner(Path("unrelated.yml"), valid_runner))
+        self.assertFalse(
+            _is_trusted_main_runner(
+                Path("docker.yml"),
+                valid_runner.replace("ng-main-run-{0}", "ng-main-run-123"),
+            )
+        )
+        self.assertFalse(
+            _is_trusted_main_runner(
+                Path("docker.yml"),
+                valid_runner.replace("refs/heads/main", "refs/heads/other"),
+            )
         )
 
     def test_fork_jit_runner_is_rejected_outside_the_approved_workflow(self) -> None:
