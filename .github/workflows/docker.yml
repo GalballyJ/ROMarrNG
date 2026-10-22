@@ -24,7 +24,7 @@ jobs:
   release-notes:
     name: Release-note contract
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot')
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -60,8 +60,8 @@ jobs:
           python scripts/release_notes.py check-changelog-tags
 
   test:
-    # Keep the complete test gate on a GitHub-hosted Linux runner.
-    runs-on: ubuntu-latest
+    # Pull requests stay hosted; trusted main validation uses the isolated shared pool.
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -103,7 +103,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -124,7 +124,7 @@ jobs:
   acquisition-proof:
     name: Packaged acquisition (${{ matrix.dockerfile }})
     if: github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +144,7 @@ jobs:
   image:
     needs: [test, release-notes, acquisition-proof]
     if: always() && needs.test.result == 'success' && needs.acquisition-proof.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -298,7 +298,7 @@ jobs:
   image_publish:
     needs: [image]
     if: always() && needs.image.result == 'success' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -310,6 +310,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify the isolated Docker daemon
+        run: docker info
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -386,7 +389,7 @@ jobs:
     name: Browser image validation
     needs: [image, release-notes]
     if: always() && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -412,7 +415,7 @@ jobs:
   image_browser_publish:
     needs: [image, release-notes]
     if: always() && github.event_name != 'pull_request' && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -424,6 +427,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify the isolated Docker daemon
+        run: docker info
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -499,7 +505,7 @@ jobs:
     name: Verify stable image aliases
     needs: [image_publish, image_browser_publish]
     if: always() && github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/v') || (needs.image_publish.result == 'success' && needs.image_browser_publish.result == 'success'))
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -524,7 +530,7 @@ jobs:
   release:
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.image_publish.result == 'success' && needs.image_browser_publish.result == 'success' && needs.verify-stable-image-tags.result == 'success'
     needs: [image_publish, image_browser_publish, verify-stable-image-tags]
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && fromJSON('{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main"]}') || 'ubuntu-latest' }}
     permissions:
       contents: write
 
