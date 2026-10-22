@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.12] - 2026-10-22
+
+### User-facing changes
+
+#### Security
+
+- **Validation:** The GitHub Actions Node.js runtime is pinned to patched version 22.23.4.
+
 ## [0.14.11] - 2026-10-21
 
 ### User-facing changes
