@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import os
 import re
 import ssl
 import sys
@@ -53,13 +54,17 @@ def https_request(
 
 
 def latest_release_version() -> str:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ROMarrNG-stable-image-tag-check",
+    }
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     status, _, body = https_request(
         "api.github.com",
         RELEASES_PATH,
-        {
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "ROMarrNG-stable-image-tag-check",
-        },
+        headers,
     )
     if status != 200:
         raise RuntimeError(f"GitHub returned HTTP {status} for the latest release")
