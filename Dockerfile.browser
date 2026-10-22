@@ -5,8 +5,6 @@
 ARG PLAYWRIGHT_VERSION=1.62.0
 
 FROM python:3.14-slim AS builder
-
-ARG TARGETARCH
 ARG PLAYWRIGHT_VERSION
 
 # pyseccomp links against libseccomp; CFFI also needs libffi headers when pip
@@ -19,10 +17,8 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt \
  && pip install --no-cache-dir --prefix=/install \
       "playwright==${PLAYWRIGHT_VERSION}" \
- && if [ "$TARGETARCH" != "arm" ]; then \
-      pip install --no-cache-dir --prefix=/install \
-        "rom-hub @ https://github.com/BlizzHacker/rom-hub/archive/8e46348783546ee03b00e2c933155ba60d29619d.tar.gz"; \
-    fi
+ && pip install --no-cache-dir --prefix=/install \
+      "rom-hub @ https://github.com/BlizzHacker/rom-hub/archive/8e46348783546ee03b00e2c933155ba60d29619d.tar.gz"
 
 FROM python:3.14-slim
 

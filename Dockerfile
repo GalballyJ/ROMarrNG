@@ -1,18 +1,18 @@
 # ROMarr -- the *arr for games.
 #
-# Two stages, because of one dependency. ROMarr is stdlib plus `requests`, and
-# requests pulls in charset-normalizer, which ships no musl wheel for every
-# architecture. On linux/arm/v7 pip therefore compiles it, and a compiler in
-# the final image would be ~180MB of toolchain nobody runs. So the build stage
-# owns the toolchain and the runtime stage receives only the result.
+# Keep compiler headers in the builder, and use Debian in both stages so
+# cryptography can use its published manylinux ARMv7 wheel. Alpine's musl
+# target has no matching wheel; its source build tries to install a Rust host
+# toolchain that rustup does not provide for 32-bit ARM.
 
-FROM python:3.14-alpine AS builder
+FROM python:3.14-slim AS builder
 
-# build-base is needed only where a wheel is missing for the target arch. It is
-# unused on amd64/arm64 and load-bearing on armv7. libseccomp-dev is what
-# pyseccomp compiles against -- the sandbox ROM Hub confines plugins with.
+# Build tools stay out of the runtime image. libseccomp-dev is what pyseccomp
+# compiles against -- the sandbox ROM Hub confines plugins with.
 # libffi-dev lets CFFI compile when pip has no wheel for the target Python/arch.
-RUN apk add --no-cache build-base libseccomp-dev libffi-dev
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential libseccomp-dev libffi-dev \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
@@ -21,24 +21,16 @@ RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
 # the bridge but never the package, so Docker installs reported "rom_hub is
 # missing" with nothing to be done about it). Pinned to a commit, because
 # "whatever master was when the image built" is not a version.
-#
-# Skipped on armv7: rom-hub depends on pydantic, whose compiled core ships no
-# musl wheel for 32-bit ARM and would drag a Rust toolchain into the build.
-# ROMarr itself runs fine there; the Hub tab reports plugins as unavailable,
-# which is the truth.
-ARG TARGETARCH
-RUN if [ "$TARGETARCH" != "arm" ]; then \
-      pip install --no-cache-dir --prefix=/install \
-        "rom-hub @ https://github.com/BlizzHacker/rom-hub/archive/8e46348783546ee03b00e2c933155ba60d29619d.tar.gz"; \
-    fi
+RUN pip install --no-cache-dir --prefix=/install \
+    "rom-hub @ https://github.com/BlizzHacker/rom-hub/archive/8e46348783546ee03b00e2c933155ba60d29619d.tar.gz"
 
 
-FROM python:3.14-alpine
+FROM python:3.14-slim
 
 ARG TARGETARCH
 
-# su-exec drops privileges in the entrypoint; it takes numeric ids, so no
-# shadow package and no user has to exist in the image. tzdata makes TZ work.
+# gosu is su-exec's Debian twin; the shared entrypoint uses the same uid:gid
+# command form on both images. tzdata makes TZ work.
 #
 # libarchive-tools provides bsdtar, which is what reads .7z and .rar. It is
 # not optional cargo: the disc platforms this image now supports ship almost
@@ -48,18 +40,12 @@ ARG TARGETARCH
 # libseccomp is the runtime half of the sandbox pyseccomp was built against.
 # ROM Hub installs catalogue plugins from pinned repository refs, so git is a
 # runtime dependency rather than builder cargo.
-RUN apk add --no-cache su-exec tzdata libarchive-tools libseccomp git
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gosu tzdata libarchive-tools libseccomp2 git ca-certificates \
+ && ln -s "$(command -v gosu)" /usr/local/bin/su-exec \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local
-
-# pyseccomp asks ctypes.util.find_library("seccomp") before opening the C
-# library. On Alpine that helper relies on linker/compiler discovery tools
-# which belong in the builder, so it returns None even though the runtime
-# package correctly installed /usr/lib/libseccomp.so.2. Give this binding the
-# normal Alpine SONAME as its fallback. The assertion deliberately breaks the
-# build if a future pyseccomp changes the line instead of silently publishing
-# another unconstrained image.
-RUN python -c "import pathlib,sysconfig; p=pathlib.Path(sysconfig.get_path('purelib'))/'pyseccomp.py'; s=p.read_text(); old='_libseccomp_path = ctypes.util.find_library(\"seccomp\")'; assert s.count(old)==1; p.write_text(s.replace(old, old+' or \"/usr/lib/libseccomp.so.2\"'))"
 
 # Importing the packages is not enough: the broken image imported ROM Hub and
 # only failed when the Plugins page asked pyseccomp to find its C library. Load
