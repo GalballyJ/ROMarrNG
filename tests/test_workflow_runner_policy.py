@@ -180,6 +180,11 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
                     f"{key}=${{{{ env.BUILDKIT_EGRESS_PROXY }}}}",
                     build["with"]["build-args"],
                 )
+            for key in ("NO_PROXY", "no_proxy"):
+                self.assertIn(
+                    f"{key}=localhost,127.0.0.1",
+                    build["with"]["build-args"],
+                )
 
         for job_name in ("image-browser", "image_publish", "image_browser_publish"):
             with self.subTest(job=job_name):
