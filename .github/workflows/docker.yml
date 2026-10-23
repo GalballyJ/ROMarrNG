@@ -150,11 +150,16 @@ jobs:
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
+          # The isolated BuildKit daemon needs the runner's trust roots too.
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              ca = ["/etc/ssl/certs/ca-certificates.crt"]
           driver-opts: |
             env.HTTP_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
             env.HTTPS_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
             env.http_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
             env.https_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
+            env.SSL_CERT_FILE=/etc/buildkit/certs/docker.io/ca-certificates.crt
 
       # The suite gates the code; nothing gated the image. A broken entrypoint,
       # a dependency that failed to install, or a missing bsdtar would all pass
