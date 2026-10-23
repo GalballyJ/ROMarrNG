@@ -47,6 +47,14 @@ option in the template or put `release-note: none` on its own line in the descri
 direct push or merge check reads commit messages, put the same marker on its own line in the
 commit message.
 
+For example, an internal workflow-only commit can use:
+
+```text
+docs(ci): document runner configuration
+
+release-note: none
+```
+
 When preparing a release, update `romarr/app.py` to the release version, then
 generate and prepend its changelog section from the fragments since the prior
 tag:
