@@ -155,8 +155,6 @@ jobs:
             env.HTTPS_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
             env.http_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
             env.https_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
-            env.NO_PROXY=localhost,127.0.0.1
-            env.no_proxy=localhost,127.0.0.1
 
       # The suite gates the code; nothing gated the image. A broken entrypoint,
       # a dependency that failed to install, or a missing bsdtar would all pass

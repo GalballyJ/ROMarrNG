@@ -166,6 +166,7 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
             self.assertIn(
                 f"env.{key}=${{{{ env.BUILDKIT_EGRESS_PROXY }}}}", driver_opts
             )
+        self.assertNotIn(",", driver_opts)
 
         builds = [
             step
