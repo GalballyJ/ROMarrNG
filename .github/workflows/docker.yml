@@ -101,6 +101,8 @@ jobs:
     needs: [test, release-notes, acquisition-proof]
     if: always() && needs.test.result == 'success' && needs.acquisition-proof.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
+    env:
+      BUILDKIT_EGRESS_PROXY: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && 'http://10.0.2.100:3128' || '' }}
     permissions:
       contents: read
     steps:
@@ -147,6 +149,14 @@ jobs:
       # under emulation. It is the slow one; the others are native-speed.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: |
+            env.HTTP_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
+            env.HTTPS_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
+            env.http_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
+            env.https_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
+            env.NO_PROXY=localhost,127.0.0.1
+            env.no_proxy=localhost,127.0.0.1
 
       # The suite gates the code; nothing gated the image. A broken entrypoint,
       # a dependency that failed to install, or a missing bsdtar would all pass
@@ -161,6 +171,13 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: romarr:smoke
+          build-args: |
+            HTTP_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
+            HTTPS_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
+            http_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
+            https_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
+            NO_PROXY=localhost,127.0.0.1
+            no_proxy=localhost,127.0.0.1
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
@@ -233,6 +250,13 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: false
+          build-args: |
+            HTTP_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
+            HTTPS_PROXY=${{ env.BUILDKIT_EGRESS_PROXY }}
+            http_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
+            https_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
+            NO_PROXY=localhost,127.0.0.1
+            no_proxy=localhost,127.0.0.1
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false

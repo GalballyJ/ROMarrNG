@@ -142,6 +142,53 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
 
 
 class WorkflowRunnerPolicyTests(unittest.TestCase):
+    def test_main_buildkit_uses_the_proxy_without_changing_hosted_builds(self) -> None:
+        workflow = yaml.safe_load(
+            (WORKFLOW_DIR / "docker.yml").read_text(encoding="utf-8")
+        )
+        image_job = workflow["jobs"]["image"]
+        expected_proxy_gate = (
+            "${{ (github.event_name == 'push' || github.event_name == "
+            "'workflow_dispatch') && github.ref == 'refs/heads/main' && "
+            "'http://10.0.2.100:3128' || '' }}"
+        )
+
+        self.assertEqual(
+            image_job["env"]["BUILDKIT_EGRESS_PROXY"], expected_proxy_gate
+        )
+        buildx = next(
+            step
+            for step in image_job["steps"]
+            if "setup-buildx-action" in step.get("uses", "")
+        )
+        driver_opts = buildx["with"]["driver-opts"]
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            self.assertIn(
+                f"env.{key}=${{{{ env.BUILDKIT_EGRESS_PROXY }}}}", driver_opts
+            )
+
+        builds = [
+            step
+            for step in image_job["steps"]
+            if "build-push-action" in step.get("uses", "")
+        ]
+        self.assertEqual(len(builds), 2)
+        for build in builds:
+            for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+                self.assertIn(
+                    f"{key}=${{{{ env.BUILDKIT_EGRESS_PROXY }}}}",
+                    build["with"]["build-args"],
+                )
+
+        for job_name in ("image-browser", "image_publish", "image_browser_publish"):
+            with self.subTest(job=job_name):
+                job = workflow["jobs"][job_name]
+                self.assertNotIn("BUILDKIT_EGRESS_PROXY", job.get("env", {}))
+                self.assertNotIn("10.0.2.100:3128", str(job))
+                if job_name == "image-browser":
+                    self.assertIn("github.event_name == 'pull_request'", job["if"])
+                    self.assertIn("|| 'ubuntu-latest'", job["runs-on"])
+
     def test_credentialed_publishers_and_release_stay_on_hosted_runners(self) -> None:
         workflow = yaml.safe_load(
             (WORKFLOW_DIR / "docker.yml").read_text(encoding="utf-8")
