@@ -53,6 +53,7 @@ def _is_trusted_main_runner(workflow: Path, runner: object) -> bool:
         return False
 
     expression = runner[4:-3]
+    expression = expression.removeprefix("(vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && ")
     condition, separator, fallback = expression.partition(
         " && " + TRUSTED_MAIN_RUNNER_PAYLOAD
     )
@@ -148,7 +149,7 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
         )
         image_job = workflow["jobs"]["image"]
         expected_proxy_gate = (
-            "${{ (github.event_name == 'push' || github.event_name == "
+            "${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (github.event_name == 'push' || github.event_name == "
             "'workflow_dispatch') && github.ref == 'refs/heads/main' && "
             "'http://10.0.2.100:3128' || '' }}"
         )
@@ -319,3 +320,4 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
