@@ -286,7 +286,7 @@ def test_the_install_guide_exists_and_the_readme_sends_people_to_it():
     assert "docs/INSTALL.md" in README.read_text(encoding="utf-8"), (
         "the full install guide is unreachable from the README")
 
-def test_public_test_job_uses_github_hosted_runner():
+def test_public_test_job_routes_trusted_refs_to_jit_with_hosted_fallback():
     workflow = (ROOT / ".github" / "workflows" / "docker.yml").read_text(
         encoding="utf-8"
     )
@@ -297,8 +297,11 @@ def test_public_test_job_uses_github_hosted_runner():
     test_job = workflow.split("  test:\n", 1)[1].split(
         "\n  validation-environment-portability:", 1
     )[0]
-    # Main-branch trusted builds may use the isolated JIT group. Pull requests,
-    # tags, and other refs must resolve to GitHub-hosted runners.
+    # Trusted main and version-tag work may use the isolated JIT group. Public
+    # pull requests and all other refs must resolve to GitHub-hosted runners.
     assert re.search(r"(?m)^    runs-on:.*ubuntu-latest.*$", test_job)
-    assert "github.event_name == 'push'" in test_job
+    assert "ng-shared-main-jit" in test_job
+    assert "ng-main-run-{0}" in test_job
     assert "github.ref == 'refs/heads/main'" in test_job
+    assert "github.ref_type == 'tag'" in test_job
+    assert "startsWith(github.ref_name, 'v')" in test_job

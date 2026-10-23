@@ -23,6 +23,8 @@ TRUSTED_MAIN_EVENT_CONDITIONS = {
     "&& github.ref == 'refs/heads/main'",
     "(github.event_name == 'push' || github.event_name == 'workflow_dispatch' "
     "|| github.event_name == 'schedule') && github.ref == 'refs/heads/main'",
+    "(contains(fromJSON('[\"push\",\"workflow_dispatch\",\"schedule\",\"release\",\"repository_dispatch\"]'), github.event_name) "
+    "&& (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))))",
 }
 
 
@@ -143,14 +145,13 @@ def _runner_policy_violations(workflow_dir: Path) -> list[str]:
 
 
 class WorkflowRunnerPolicyTests(unittest.TestCase):
-    def test_main_buildkit_uses_the_proxy_without_changing_hosted_builds(self) -> None:
+    def test_main_and_release_buildkit_use_the_proxy_with_hosted_fallback(self) -> None:
         workflow = yaml.safe_load(
             (WORKFLOW_DIR / "docker.yml").read_text(encoding="utf-8")
         )
         image_job = workflow["jobs"]["image"]
         expected_proxy_gate = (
-            "${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (github.event_name == 'push' || github.event_name == "
-            "'workflow_dispatch') && github.ref == 'refs/heads/main' && "
+            "${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('[\"push\",\"workflow_dispatch\",\"schedule\",\"release\",\"repository_dispatch\"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && "
             "'http://10.0.2.100:3128' || '' }}"
         )
 
@@ -196,15 +197,17 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
                     self.assertIn("github.event_name == 'pull_request'", job["if"])
                     self.assertIn("|| 'ubuntu-latest'", job["runs-on"])
 
-    def test_credentialed_publishers_and_release_stay_on_hosted_runners(self) -> None:
+    def test_publishers_and_release_use_the_trusted_runner_route(self) -> None:
         workflow = yaml.safe_load(
             (WORKFLOW_DIR / "docker.yml").read_text(encoding="utf-8")
         )
 
         for job_name in ("image_publish", "image_browser_publish", "release"):
             with self.subTest(job=job_name):
-                self.assertEqual(
-                    workflow["jobs"][job_name]["runs-on"], "ubuntu-latest"
+                self.assertTrue(
+                    _is_trusted_main_runner(
+                        Path("docker.yml"), workflow["jobs"][job_name]["runs-on"]
+                    )
                 )
 
     def test_dependency_review_runs_use_pull_request_scoped_cancellation(self) -> None:
