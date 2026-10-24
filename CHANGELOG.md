@@ -1,12 +1,22 @@
 # Changelog
 
-## [0.14.12] - 2026-10-22
+## [0.14.12] - 2026-10-24
 
 ### User-facing changes
 
+#### Fixed
+
+- **Ci:** The Semgrep container now inherits the isolated runner's proxy and trusted certificate bundle so it can fetch community rules through the restricted egress path.
+- **Validation:** Trusted main validation now carries only the verified Python tool-cache library path into its test processes, and the packaged acquisition checks receive Docker in their disposable runner VMs. Pull-request validation remains isolated from the shared main runner pool.
+- **Ci:** Eligible Linux validation gains staged hosted-first routing with a JIT retry path. Superseded security scans are cancelled. Hosted-first routing remains disabled until the updated runner broker is deployed and the operator enables `NG_HOSTED_FIRST`; platform-specific and pull-request runner boundaries remain enforced.
+- **Unraid:** Unraid installs that still pull the retired image path now receive each stable ROMarrNG release automatically, so the template's latest tag no longer stays on an old version.
+
 #### Security
 
-- **Validation:** The GitHub Actions Node.js runtime is pinned to patched version 22.23.4.
+- **Downloader:** Remote browser downloader endpoints now use TLS by default and reject URL credentials. Configure a certificate trusted by the browser, or explicitly set `ROMARR_ALLOW_INSECURE_BROWSER_ENDPOINTS=true` only on an isolated trusted network that cannot use TLS.
+  - **Action required:** Configure a trusted certificate for remote browser endpoints
+- **Metadata:** IGDB client credentials now travel in the HTTPS token request body rather than its URL, keeping the client secret out of query strings recorded by proxies and request logs.
+- **Validation:** GitHub Actions validation now uses patched Node.js 22.23.4 instead of an unpinned major-version selector.
 
 ## [0.14.11] - 2026-10-21
 
