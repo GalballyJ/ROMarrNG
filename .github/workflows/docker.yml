@@ -402,14 +402,10 @@ jobs:
   image_publish:
     needs: [image]
     if: >-
-      (github.event_name != 'pull_request_target' &&
-      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
-       github.event.pull_request.user.login != 'snapetech' ||
-       github.event.pull_request.head.repo.full_name != github.repository ||
-       github.event.pull_request.head.repo.id != github.repository_id ||
-       github.event.pull_request.base.ref != 'main') &&
-      (github.event_name != 'workflow_dispatch' ||
-       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && needs.image.result == 'success' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'))
+      github.event_name == 'push' &&
+      github.ref_type == 'tag' &&
+      startsWith(github.ref_name, 'v') &&
+      needs.image.result == 'success'
     runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-image_publish"]}}', github.run_id)) || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -538,14 +534,12 @@ jobs:
   image_browser_publish:
     needs: [image, release-notes]
     if: >-
-      (github.event_name != 'pull_request_target' &&
-      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
-       github.event.pull_request.user.login != 'snapetech' ||
-       github.event.pull_request.head.repo.full_name != github.repository ||
-       github.event.pull_request.head.repo.id != github.repository_id ||
-       github.event.pull_request.base.ref != 'main') &&
-      (github.event_name != 'workflow_dispatch' ||
-       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && github.event_name != 'pull_request' && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'))
+      always() &&
+      github.event_name == 'push' &&
+      github.ref_type == 'tag' &&
+      startsWith(github.ref_name, 'v') &&
+      needs.image.result == 'success' &&
+      (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped')
     runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-image_browser_publish"]}}', github.run_id)) || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -668,14 +662,13 @@ jobs:
 
   release:
     if: >-
-      (github.event_name != 'pull_request_target' &&
-      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
-       github.event.pull_request.user.login != 'snapetech' ||
-       github.event.pull_request.head.repo.full_name != github.repository ||
-       github.event.pull_request.head.repo.id != github.repository_id ||
-       github.event.pull_request.base.ref != 'main') &&
-      (github.event_name != 'workflow_dispatch' ||
-       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && startsWith(github.ref, 'refs/tags/v') && needs.image_publish.result == 'success' && needs.image_browser_publish.result == 'success' && needs.verify-stable-image-tags.result == 'success')
+      always() &&
+      github.event_name == 'push' &&
+      github.ref_type == 'tag' &&
+      startsWith(github.ref_name, 'v') &&
+      needs.image_publish.result == 'success' &&
+      needs.image_browser_publish.result == 'success' &&
+      needs.verify-stable-image-tags.result == 'success'
     needs: [image_publish, image_browser_publish, verify-stable-image-tags]
     runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-release"]}}', github.run_id)) || 'ubuntu-latest' }}
     permissions:
