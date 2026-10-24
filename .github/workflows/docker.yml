@@ -1,5 +1,8 @@
 # ng-runner-policy: hosted-first-v1
 name: docker
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number != '' &&
+      format('owner-pr:{0}:{1}:{2}', inputs.pr_number, inputs.pr_sha, inputs.target_run_id) || github.workflow }}
 
 # Tests gate the image. A published `latest` that fails its own suite is worse
 # than no published image, because somebody else is now running it.
@@ -9,8 +12,24 @@ on:
     branches: ["main"]
     tags: ["v*"]
   pull_request:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
   workflow_dispatch:
+    inputs:
 
+      pr_number:
+        description: Trusted owner PR number (set only by the metadata dispatcher)
+        required: false
+        type: string
+      pr_sha:
+        description: Exact owner PR head SHA
+        required: false
+        type: string
+      target_run_id:
+        description: Successful metadata-only pull_request_target run ID
+        required: false
+        type: string
 permissions:
   contents: read
 
@@ -24,13 +43,31 @@ concurrency:
 jobs:
   release-notes:
     name: Release-note contract
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot')
-    runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') &&
+       inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name != 'pull_request_target' &&
+       (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+        github.event.pull_request.user.login != 'snapetech' ||
+        github.event.pull_request.head.repo.full_name != github.repository ||
+        github.event.pull_request.head.repo.id != github.repository_id ||
+        github.event.pull_request.base.ref != 'main') &&
+       (github.event_name != 'workflow_dispatch' ||
+        (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == '')) &&
+       ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot')))
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-release-notes"]}}', github.run_id)) || (!(github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && ((vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest')) }}
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -39,15 +76,74 @@ jobs:
       - name: Validate stable image tag policy
         run: python scripts/check_image_alias_policy.py
 
+      - name: Resolve current trusted PR metadata
+        id: owner_pr
+        if: inputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_SHA: ${{ inputs.pr_sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          repo = os.environ['REPOSITORY']
+          number = os.environ['PR_NUMBER']
+          expected = os.environ['PR_SHA'].lower()
+          if repo.lower() != 'snapetech-org/romarrng' or not re.fullmatch(r'[1-9][0-9]*', number) or not re.fullmatch(r'[0-9a-f]{40}', expected):
+              raise SystemExit('invalid trusted PR claim')
+          request = Request(
+              f'https://api.github.com/repos/{repo}/pulls/{number}',
+              headers={
+                  'Accept': 'application/vnd.github+json',
+                  'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urlopen(request, timeout=20) as response:
+              pr = json.load(response)
+          base = pr.get('base') or {}
+          head = pr.get('head') or {}
+          base_repo = base.get('repo') or {}
+          head_repo = head.get('repo') or {}
+          sha = (head.get('sha') or '').lower()
+          if (
+              pr.get('state') != 'open'
+              or ((pr.get('user') or {}).get('login') or '').lower() != 'snapetech'
+              or base.get('ref') != 'main'
+              or sha != expected
+              or (base_repo.get('full_name') or '').lower() != repo.lower()
+              or (head_repo.get('full_name') or '').lower() != repo.lower()
+              or base_repo.get('id') != head_repo.get('id')
+          ):
+              raise SystemExit('PR changed or is not trusted')
+          base_sha = (base.get('sha') or '').lower()
+          if not re.fullmatch(r'[0-9a-f]{40}', base_sha):
+              raise SystemExit('invalid PR base')
+          body = Path(os.environ['RUNNER_TEMP']) / 'owner-pr-body.md'
+          body.write_text(pr.get('body') or '', encoding='utf-8')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'base_sha={base_sha}\n')
+              output.write(f'body_file={body}\n')
+          PY
+
       - name: Validate release-note fragment or explicit opt-out
         env:
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ inputs.pr_number != '' && steps.owner_pr.outputs.base_sha || (github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before) }}
+          HEAD_SHA: ${{ inputs.pr_sha != '' && inputs.pr_sha || github.sha }}
           PR_BODY: ${{ github.event_name == 'pull_request' && github.event.pull_request.body || github.event.head_commit.message || '' }}
+          BODY_FILE: ${{ steps.owner_pr.outputs.body_file || '' }}
         run: |
           set -euo pipefail
-          body_file="$RUNNER_TEMP/pr-body.md"
-          printf '%s' "$PR_BODY" > "$body_file"
+          if [[ -n "${BODY_FILE:-}" ]]; then
+            body_file="$BODY_FILE"
+          else
+            body_file="$RUNNER_TEMP/pr-body.md"
+            printf '%s' "$PR_BODY" > "$body_file"
+          fi
           validation_args=()
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
             validation_args+=(--allow-mixed-push-batch)
@@ -61,13 +157,26 @@ jobs:
           python scripts/release_notes.py check-changelog-tags
 
   test:
+    if: >-
+      ((github.event_name == 'workflow_dispatch' &&
+      (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') &&
+      inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' &&
+      github.ref == 'refs/heads/main')) || ((github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+       github.event.pull_request.user.login != 'snapetech' ||
+       github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.head.repo.id != github.repository_id ||
+       github.event.pull_request.base.ref != 'main') &&
+      (github.event_name != 'workflow_dispatch' ||
+       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))))
     # Pull requests stay hosted; trusted main validation uses the isolated shared pool.
-    runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-test"]}}', github.run_id)) || (!(github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && ((vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest')) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || (github.sha) }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
@@ -80,8 +189,19 @@ jobs:
 
   acquisition-proof:
     name: Packaged acquisition (${{ matrix.dockerfile }})
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
+    if: >-
+      ((github.event_name == 'workflow_dispatch' &&
+      (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') &&
+      inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' &&
+      github.ref == 'refs/heads/main') && (github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || ((github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+       github.event.pull_request.user.login != 'snapetech' ||
+       github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.head.repo.id != github.repository_id ||
+       github.event.pull_request.base.ref != 'main') &&
+      (github.event_name != 'workflow_dispatch' ||
+       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && ((matrix.dockerfile == 'Dockerfile' && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-acquisition-dockerfile"]}}', github.run_id))) || (matrix.dockerfile == 'Dockerfile.browser' && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-acquisition-browser"]}}', github.run_id)))) || (!(github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && ((vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -90,6 +210,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || (github.sha) }}
       - name: Build native test image
         run: docker build --build-arg TARGETARCH=amd64 -f "${{ matrix.dockerfile }}" -t romarrng:acquisition-proof .
       - name: Prove sandboxed acquisition and SeerrNG delivery
@@ -100,10 +221,21 @@ jobs:
 
   image:
     needs: [test, release-notes, acquisition-proof]
-    if: always() && needs.test.result == 'success' && needs.acquisition-proof.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
-    runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
+    if: >-
+      ((github.event_name == 'workflow_dispatch' &&
+      (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') &&
+      inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' &&
+      github.ref == 'refs/heads/main') && (always() && needs.test.result == 'success' && needs.acquisition-proof.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'))) || ((github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+       github.event.pull_request.user.login != 'snapetech' ||
+       github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.head.repo.id != github.repository_id ||
+       github.event.pull_request.base.ref != 'main') &&
+      (github.event_name != 'workflow_dispatch' ||
+       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && needs.test.result == 'success' && needs.acquisition-proof.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.event_name != 'push' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')))
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-image"]}}', github.run_id)) || (!(github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && ((vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest')) }}
     env:
-      BUILDKIT_EGRESS_PROXY: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && 'http://10.0.2.100:3128' || '' }}
+      BUILDKIT_EGRESS_PROXY: ${{ ((github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') || ((vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))))) && 'http://10.0.2.100:3128' || '' }}
     permissions:
       contents: read
     steps:
@@ -112,6 +244,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || (github.sha) }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
@@ -182,8 +315,8 @@ jobs:
             https_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
             NO_PROXY=localhost,127.0.0.1
             no_proxy=localhost,127.0.0.1
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: ${{ inputs.pr_number == '' && 'type=gha' || '' }}
+          cache-to: ${{ inputs.pr_number == '' && 'type=gha,mode=max' || '' }}
           provenance: false
 
       - name: Boot the image and ask it whether it is alive
@@ -248,7 +381,8 @@ jobs:
           docker rm -f smoke
 
       - name: Build all supported platforms without publishing
-        if: github.event_name == 'pull_request'
+        if: >-
+          github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main')
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -261,13 +395,21 @@ jobs:
             https_proxy=${{ env.BUILDKIT_EGRESS_PROXY }}
             NO_PROXY=localhost,127.0.0.1
             no_proxy=localhost,127.0.0.1
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: ${{ inputs.pr_number == '' && 'type=gha' || '' }}
+          cache-to: ${{ inputs.pr_number == '' && 'type=gha,mode=max' || '' }}
           provenance: false
 
   image_publish:
     needs: [image]
-    if: always() && needs.image.result == 'success' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    if: >-
+      (github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+       github.event.pull_request.user.login != 'snapetech' ||
+       github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.head.repo.id != github.repository_id ||
+       github.event.pull_request.base.ref != 'main') &&
+      (github.event_name != 'workflow_dispatch' ||
+       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && needs.image.result == 'success' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'))
     runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -358,8 +500,18 @@ jobs:
   image-browser:
     name: Browser image validation
     needs: [image, release-notes]
-    if: always() && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && github.event_name == 'pull_request'
-    runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
+    if: >-
+      ((github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && (always() && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped'))) || ((github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+       github.event.pull_request.user.login != 'snapetech' ||
+       github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.head.repo.id != github.repository_id ||
+       github.event.pull_request.base.ref != 'main') &&
+      (github.event_name != 'workflow_dispatch' ||
+       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && github.event_name == 'pull_request'))
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-image-browser"]}}', github.run_id)) || (!(github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && ((vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest')) }}
+    env:
+      BUILDKIT_EGRESS_PROXY: ${{ ((github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') || ((vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))))) && 'http://10.0.2.100:3128' || '' }}
     permissions:
       contents: read
     steps:
@@ -367,6 +519,7 @@ jobs:
         with:
           persist-credentials: false
 
+          ref: ${{ inputs.pr_sha != '' && inputs.pr_sha || (github.sha) }}
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -378,13 +531,21 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           tags: romarrng:browser-validation
-          cache-from: type=gha,scope=browser
-          cache-to: type=gha,scope=browser,mode=max
+          cache-from: ${{ inputs.pr_number == '' && 'type=gha,scope=browser' || '' }}
+          cache-to: ${{ inputs.pr_number == '' && 'type=gha,scope=browser,mode=max' || '' }}
           provenance: false
 
   image_browser_publish:
     needs: [image, release-notes]
-    if: always() && github.event_name != 'pull_request' && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    if: >-
+      (github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+       github.event.pull_request.user.login != 'snapetech' ||
+       github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.head.repo.id != github.repository_id ||
+       github.event.pull_request.base.ref != 'main') &&
+      (github.event_name != 'workflow_dispatch' ||
+       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && github.event_name != 'pull_request' && needs.image.result == 'success' && (needs.release-notes.result == 'success' || needs.release-notes.result == 'skipped') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'))
     runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -474,7 +635,15 @@ jobs:
   verify-stable-image-tags:
     name: Verify stable image aliases
     needs: [image_publish, image_browser_publish]
-    if: always() && github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/v') || (needs.image_publish.result == 'success' && needs.image_browser_publish.result == 'success'))
+    if: >-
+      (github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+       github.event.pull_request.user.login != 'snapetech' ||
+       github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.head.repo.id != github.repository_id ||
+       github.event.pull_request.base.ref != 'main') &&
+      (github.event_name != 'workflow_dispatch' ||
+       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/v') || (needs.image_publish.result == 'success' && needs.image_browser_publish.result == 'success')))
     runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -498,7 +667,15 @@ jobs:
           fi
 
   release:
-    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.image_publish.result == 'success' && needs.image_browser_publish.result == 'success' && needs.verify-stable-image-tags.result == 'success'
+    if: >-
+      (github.event_name != 'pull_request_target' &&
+      (github.event_name != 'pull_request' || github.actor != 'snapetech' ||
+       github.event.pull_request.user.login != 'snapetech' ||
+       github.event.pull_request.head.repo.full_name != github.repository ||
+       github.event.pull_request.head.repo.id != github.repository_id ||
+       github.event.pull_request.base.ref != 'main') &&
+      (github.event_name != 'workflow_dispatch' ||
+       (inputs.pr_number == '' && inputs.pr_sha == '' && inputs.target_run_id == ''))) && (always() && startsWith(github.ref, 'refs/tags/v') && needs.image_publish.result == 'success' && needs.image_browser_publish.result == 'success' && needs.verify-stable-image-tags.result == 'success')
     needs: [image_publish, image_browser_publish, verify-stable-image-tags]
     runs-on: ${{ (vars.NG_HOSTED_FIRST != 'true' || vars.NG_FORCE_JIT == 'true' || github.run_attempt > 1) && (contains(fromJSON('["push","workflow_dispatch","schedule","release","repository_dispatch"]'), github.event_name) && (github.ref == 'refs/heads/main' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')))) && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}"]}}', github.run_id)) || 'ubuntu-latest' }}
     permissions:
@@ -619,3 +796,75 @@ jobs:
               sleep 1
             fi
           done
+
+  dispatch-owner-pr:
+    name: Dispatch trusted owner PR validation
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.actor == 'snapetech' &&
+      github.event.pull_request.user.login == 'snapetech' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.repo.id == github.repository_id &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ${{ (github.event_name == 'pull_request_target' && github.actor == 'snapetech' && github.event.pull_request.user.login == 'snapetech' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.id == github.repository_id && github.event.pull_request.base.ref == 'main') && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-owner-pr-dispatcher"]}}', github.run_id)) }}
+    permissions:
+      actions: write
+      contents: none
+    steps:
+      - name: Dispatch PR-head validation from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          TARGET_RUN_ID: ${{ github.run_id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re
+          from urllib.request import Request,urlopen
+          expected='snapetech-org/ROMarrNG'
+          repository=os.environ['GITHUB_REPOSITORY'];number=os.environ['PR_NUMBER'];sha=os.environ['PR_SHA'].lower();target=os.environ['TARGET_RUN_ID'];token=os.environ['GH_TOKEN']
+          if repository.lower()!=expected.lower() or not re.fullmatch(r'[1-9][0-9]*',number) or not re.fullmatch(r'[0-9a-f]{40}',sha) or not re.fullmatch(r'[1-9][0-9]*',target):raise SystemExit('invalid PR claim')
+          payload=json.dumps({"ref": "main", "inputs": {"pr_number": number, "pr_sha": sha, "target_run_id": target}}).encode()
+          request=Request(
+            'https://api.github.com/repos/snapetech-org/ROMarrNG/actions/workflows/docker.yml/dispatches',
+            data=payload,headers={'Accept':'application/vnd.github+json','Authorization':f'Bearer {token}','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},method='POST')
+          with urlopen(request,timeout=20) as response:
+            if response.status!=204:raise SystemExit(f'dispatch HTTP {response.status}')
+          PY
+
+  report-owner-pr-check:
+    name: Report trusted owner PR validation
+    needs: [release-notes, test, acquisition-proof, image, image-browser]
+    if: >-
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') &&
+      inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && (github.actor == 'snapetech' || github.actor == 'github-actions[bot]') && inputs.pr_number != '' && inputs.pr_sha != '' && inputs.target_run_id != '' && github.ref == 'refs/heads/main') && fromJSON(format('{{"group":"ng-shared-main-jit","labels":["self-hosted","linux","x64","ng-shared-main-romarrng","ng-main-run-{0}","gha-{0}-owner-pr-reporter"]}}', github.run_id)) }}
+    permissions:
+      checks: write
+      contents: none
+    steps:
+      - name: Attach validation result to the PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_SHA: ${{ inputs.pr_sha }}
+          VALIDATION_RUN_ID: ${{ github.run_id }}
+          VALIDATION_RESULTS: '{"release-notes":"${{ needs.release-notes.result }}","test":"${{ needs.test.result }}","acquisition-proof":"${{ needs.acquisition-proof.result }}","image":"${{ needs.image.result }}","image-browser":"${{ needs.image-browser.result }}"}'
+        run: |
+          python3 - <<'PY'
+          import json,os,re
+          from urllib.request import Request,urlopen
+          number=os.environ['PR_NUMBER'];sha=os.environ['PR_SHA'].lower();results=json.loads(os.environ['VALIDATION_RESULTS'])
+          if not re.fullmatch(r'[1-9][0-9]*',number) or not re.fullmatch(r'[0-9a-f]{40}',sha) or not results:raise SystemExit('invalid PR check claim')
+          conclusion='success' if all(v=='success' for v in results.values()) else 'failure'
+          summary='Main-pinned, no-secret owner PR validation:\n'+'\n'.join(f'- {n}: {v}' for n,v in results.items())
+          run_id=os.environ['VALIDATION_RUN_ID']
+          payload=json.dumps({"name": "ROMarrNG owner PR validation", "head_sha": sha, "external_id": run_id, "status": "completed", "conclusion": conclusion, "details_url": "https://github.com/snapetech-org/ROMarrNG/actions/runs/" + run_id, "output": {"title": "Owner PR validation " + conclusion, "summary": summary}}).encode()
+          request=Request('https://api.github.com/repos/snapetech-org/ROMarrNG/check-runs',data=payload,headers={'Accept':'application/vnd.github+json','Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},method='POST')
+          with urlopen(request,timeout=20) as response:
+            if response.status not in {201,202}:raise SystemExit(f'check HTTP {response.status}')
+          PY
