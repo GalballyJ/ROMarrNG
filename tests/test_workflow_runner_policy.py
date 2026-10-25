@@ -210,7 +210,7 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
                     )
                 )
 
-    def test_dependency_review_runs_use_pull_request_scoped_cancellation(self) -> None:
+    def test_dependency_review_runs_use_run_scoped_non_cancelling_concurrency(self) -> None:
         workflow = yaml.safe_load(
             (WORKFLOW_DIR / "dependency-review.yml").read_text(encoding="utf-8")
         )
@@ -218,8 +218,8 @@ class WorkflowRunnerPolicyTests(unittest.TestCase):
         self.assertEqual(
             workflow["concurrency"],
             {
-                "group": "${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}",
-                "cancel-in-progress": True,
+                "group": "${{ github.workflow }}-${{ github.run_id }}",
+                "cancel-in-progress": False,
             },
         )
 
