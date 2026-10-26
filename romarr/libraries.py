@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -692,8 +693,15 @@ class FolderLibrary:
     # reported as at-least. An honest ceiling beats a slow exact answer.
     MAX_SCAN = 50_000
 
+    # The tree is walked at most once per interval; count() and every
+    # shelf page then read the same snapshot instead of re-walking the
+    # tree, which is quadratic in the number of pages on a hard drive.
+    SNAP_TTL = 600.0
+
     def __init__(self, config: FolderConfig):
         self._config = config
+        self._snap: list | None = None
+        self._snap_ts = 0.0
 
     @property
     def configured(self) -> bool:
@@ -766,9 +774,31 @@ class FolderLibrary:
             log.warning("folder library unreachable: %s", err.__class__.__name__)
             return False
 
+    def _snapshot(self, force: bool = False) -> list:
+        """One complete walk, cached for SNAP_TTL seconds.
+
+        Without this, count() plus every shelf page each re-walk the
+        whole tree, and the walk is the expensive part -- a 20,000-file
+        library on a hard drive takes minutes per page. rescan() drops
+        the snapshot so freshly imported files are picked up next read.
+        """
+        now = time.monotonic()
+        if (self._snap is not None and not force
+                and now - self._snap_ts < self.SNAP_TTL):
+            return self._snap
+        try:
+            self._snap = list(self._walk(self.MAX_SCAN))
+        except OSError as err:
+            log.warning("folder library snapshot failed: %s",
+                        err.__class__.__name__)
+            if self._snap is None:
+                self._snap = []
+        self._snap_ts = now
+        return self._snap
+
     def count(self) -> int:
         try:
-            return sum(1 for _ in self._walk(self.MAX_SCAN))
+            return len(self._snapshot())
         except OSError as err:
             log.warning("folder library count failed: %s", err.__class__.__name__)
             return 0
@@ -783,9 +813,7 @@ class FolderLibrary:
         """
         out: list[Game] = []
         try:
-            for n, path in enumerate(self._walk(offset + limit)):
-                if n < offset:
-                    continue
+            for path in self._snapshot()[offset:offset + limit]:
                 out.append(Game(
                     id=str(path),
                     name=path.name if path.is_dir() else path.stem,
@@ -800,11 +828,13 @@ class FolderLibrary:
         return out
 
     def rescan(self, platform_slug: str | None = None) -> bool:
-        """Nothing to tell. The file is on disk; the frontend finds it.
+        """Drop the snapshot so a just-imported file is in the next walk.
 
         True rather than False for the same reason as Gaseous: nothing failed,
         and reporting failure would mark every successful import as half-broken.
         """
+        self._snap = None
+        self._snap_ts = 0.0
         return True
 
 
